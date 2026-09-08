@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Logs
+*.log
+vite-dev.log
+vite-dev-error.log
+
+# Test coverage
+coverage/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*.local
+# Keep workspace settings if desired; uncomment if you want them tracked

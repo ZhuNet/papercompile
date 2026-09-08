@@ -1,0 +1,28 @@
+[package]
+name = "papercompile"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[lib]
+name = "papercompile_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+thiserror = "2"
+lopdf = "0.44"
+base64 = "0.22"
+tempfile = "3"
+trash = "5"
+notify = "8"
+
+[dev-dependencies]

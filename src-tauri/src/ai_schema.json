@@ -1,0 +1,21 @@
+{
+  "format": "mixed_text_and_tools",
+  "tool_block": "<tool>{JSON action}</tool>",
+  "completion": "<tool>Done</tool>",
+  "actions": [
+    { "type": "read_file", "path": "chapters/intro.tex" },
+    { "type": "patch", "path": "main.tex", "old_text": "Old title", "new_text": "New title" },
+    { "type": "create_file", "path": "notes.txt", "content": "Project note" },
+    { "type": "create_folder", "path": "figures" },
+    { "type": "rename", "from": "draft.tex", "to": "main.tex" },
+    { "type": "move", "from": "draft.tex", "to": "chapters/draft.tex" },
+    { "type": "trash", "path": "old.tex" }
+  ],
+  "rules": [
+    "Put each action in its own tool block.",
+    "Use patch only for .tex files.",
+    "For patch, old_text must be copied exactly from a previous read_file result and must identify one location in the file.",
+    "Keep ordinary explanations outside tool blocks and return them exactly as written.",
+    "Use Done only after every requested modification has executed successfully."
+  ]
+}
