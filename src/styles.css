@@ -66,7 +66,8 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .ai-dock-toggle span { width: 22px; height: 8px; background: #9aa5b4; clip-path: polygon(0 0, 100% 0, 50% 100%); }
 .ai-dock.collapsed .ai-dock-toggle span { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .ai-dock .ai-body { display: grid; grid-template-columns: minmax(0, 72fr) minmax(260px, 28fr); gap: 10px; width: 100%; height: 170px; max-width: none; padding: 4px 10px 10px; }
-.ai-interaction { min-width: 0; overflow: auto; padding: 8px 12px; border: 1px solid #314057; border-radius: 7px; background: #141f30; scrollbar-color: #47566b transparent; }
+.ai-interaction { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); min-width: 0; overflow: hidden; border: 1px solid #314057; border-radius: 7px; background: #141f30; }
+.ai-interaction-scroll { min-height: 0; overflow: auto; padding: 8px 12px; scrollbar-color: #47566b transparent; }
 .ai-interaction-empty { display: grid; height: 100%; place-items: center; color: #647287; font-size: 11px; }
 .ai-turn { display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 7px; margin: 0 0 5px; color: #c8ced6; font-size: 10px; }
 .ai-turn > span { color: #7e8ca0; font-weight: 700; }
@@ -83,9 +84,9 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .ai-activity.failed .ai-activity-spinner { border: 0; width: 14px; height: 14px; }
 .ai-activity.failed .ai-activity-spinner::after { content: "!"; }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
-.ai-completion { margin: 0; padding: 6px 8px; border: 1px solid #3f875d; border-radius: 5px; background: #1d3b2a; color: #9ee0b5; font-weight: 700; }
 .ai-turn p { margin: 0; line-height: 1.55; white-space: pre-wrap; }
-.ai-task-state { padding-top: 4px; border-top: 1px solid #2d3a4e; color: #78869a; font-size: 9px; }
+.ai-toast { position: absolute; top: 50%; left: 50%; z-index: 4; max-width: 82%; padding: 7px 12px; transform: translate(-50%, -50%); border: 1px solid #3d4c61; border-radius: 6px; background: #243248f2; color: #e6ebf2; font-size: 10px; text-align: center; box-shadow: 0 6px 18px #0006; animation: ai-toast-in 0.16s ease-out; pointer-events: none; }
+@keyframes ai-toast-in { from { opacity: 0; transform: translate(-50%, -46%); } }
 .ai-composer { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) 36px; min-width: 0; overflow: hidden; border: 1px solid #3d4c61; border-radius: 7px; background: #243248; }
 .ai-composer > textarea { width: 100%; min-height: 0; padding: 12px; resize: none; border: 0; outline: none; background: transparent; color: #f3f4f1; font-size: 11px; line-height: 1.55; }
 .composer-actions { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 4px; background: #243248; }
@@ -93,6 +94,7 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .composer-actions button:hover { background: #314158; color: #fff; }
 .composer-actions button.active { background: #314158; color: #fff; }
 .composer-actions svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.composer-actions svg.ai-send-stop { fill: currentColor; stroke: none; }
 .ai-composer .ai-settings-popover { inset: 0 0 36px; z-index: 3; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 3px; width: auto; height: auto; padding: 6px 8px; overflow: hidden; border: 0; border-radius: 0; background: #243248; box-shadow: none; }
 .ai-composer .ai-settings-popover label { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 6px; align-items: center; min-height: 0; }
 .ai-composer .ai-settings-popover label span { color: #98a5b6; font-size: 9px; }

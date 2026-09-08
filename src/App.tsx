@@ -55,7 +55,6 @@ type AiTurn =
       role: "assistant";
       content: string;
       parts: AiPart[];
-      completed?: boolean;
     };
 type ProjectFile = {
   path: string;
@@ -92,7 +91,8 @@ export function App() {
   const [view, setView] = createSignal<"preview" | "source">("source");
   const [aiOpen, setAiOpen] = createSignal(true);
   const [prompt, setPrompt] = createSignal("");
-  const [task, setTask] = createSignal("");
+  const [aiToast, setAiToast] = createSignal("");
+  const [aiRunning, setAiRunning] = createSignal(false);
   const [notice, setNotice] = createSignal<{
     title: string;
     detail: string;
@@ -157,6 +157,15 @@ export function App() {
     ),
   );
   const outlineTree = createMemo(() => buildOutlineTree(outline()));
+
+  let aiToastTimer: ReturnType<typeof setTimeout> | undefined;
+  let aiRunToken = 0;
+  const flashAiToast = (message: string) => {
+    setAiToast(message);
+    clearTimeout(aiToastTimer);
+    aiToastTimer = setTimeout(() => setAiToast(""), 2600);
+  };
+  onCleanup(() => clearTimeout(aiToastTimer));
 
   const applyProjectFiles = (project: ProjectResponse) => {
     setProjectFiles(project.files);
@@ -314,13 +323,13 @@ export function App() {
           content: file.content,
         });
       } catch (error) {
-        setTask(`保存失败 · ${String(error)}`);
+        flashAiToast(`保存失败 · ${String(error)}`);
         return false;
       }
     }
     if (dirty()) {
       await refreshProjectFiles();
-      setTask("项目源码已保存");
+      flashAiToast("项目源码已保存");
     }
     return true;
   };
@@ -434,9 +443,9 @@ export function App() {
     if (!projectRoot()) return;
     try {
       await operation();
-      setTask(message);
+      flashAiToast(message);
     } catch (error) {
-      setTask(`文件操作失败 · ${String(error)}`);
+      flashAiToast(`文件操作失败 · ${String(error)}`);
     }
   };
   const goToPage = (page: number) => {
@@ -514,11 +523,11 @@ export function App() {
   const runAi = async () => {
     if (!prompt().trim()) return;
     if (!projectRoot()) {
-      setTask("AI 未执行 · 请先打开本地项目");
+      flashAiToast("AI 未执行 · 请先打开本地项目");
       return;
     }
     if (!aiKey().trim()) {
-      setTask("AI 未执行 · 请在设置中填写 API Key 并点击应用");
+      flashAiToast("AI 未执行 · 请在设置中填写 API Key 并点击应用");
       return;
     }
     const instruction = prompt();
@@ -533,12 +542,15 @@ export function App() {
     setAiHistory(history);
     setAiContext(context);
     setPrompt("");
-    setTask("AI 正在操作当前项目目录...");
+    const token = (aiRunToken += 1);
+    const active = () => aiRunToken === token;
+    setAiRunning(true);
     try {
       let step = 0;
       let done = false;
       while (true) {
         if (done) break;
+        if (!active()) break;
         const directory = [
           ...projectFolders().map((path) => `${path}/`),
           ...projectFiles().map((file) => file.path),
@@ -553,6 +565,7 @@ export function App() {
           directory,
           history: context,
         });
+        if (!active()) break;
         step += 1;
         if (!response.actions.every(isSafeAiAction))
           throw new Error("AI 返回了项目目录外操作");
@@ -628,18 +641,22 @@ export function App() {
           setAiContext([...context]);
         }
         done = response.done === true;
-        assistantTurn.completed = done;
-        history[assistantIndex] = {
-          ...assistantTurn,
-          parts: [...assistantTurn.parts],
-        };
-        setAiHistory([...history]);
-        if (done) setTask("");
-        if (!done && !toolResult) break;
       }
     } catch (error) {
-      setTask(`AI 操作失败 · ${String(error)}`);
+      if (active()) flashAiToast(`AI 操作失败 · ${String(error)}`);
+    } finally {
+      if (active()) setAiRunning(false);
     }
+  };
+
+  const stopAi = () => {
+    aiRunToken += 1;
+    setAiRunning(false);
+  };
+
+  const toggleAiRun = () => {
+    if (aiRunning()) stopAi();
+    else void runAi();
   };
 
   const openAiSettings = () => {
@@ -670,7 +687,7 @@ export function App() {
       key: aiKey(),
     });
     setAiSettingsOpen(false);
-    setTask("AI 配置已应用");
+    flashAiToast("AI 配置已应用");
   };
 
   return (
@@ -1008,46 +1025,45 @@ export function App() {
         <Show when={aiOpen()}>
           <div class="ai-body">
             <div class="ai-interaction">
-              <Show
-                when={visibleAiTurns(aiHistory()).length}
-                fallback={
-                  <div class="ai-interaction-empty">
-                    在右侧输入任务，操作记录将在这里显示。
-                  </div>
-                }
-              >
-                <For each={visibleAiTurns(aiHistory())}>
-                  {(turn) => (
-                    <div class={`ai-turn ${turn.role}`}>
-                      <span>{turn.role === "user" ? "你" : "AI"}</span>
-                      <div class="ai-turn-body">
-                        {turn.role === "user" ? (
-                          <p>{turn.content}</p>
-                        ) : (
-                          <For each={turn.parts}>
-                            {(part) =>
-                              part.kind === "text" ? (
-                                <p>{part.text}</p>
-                              ) : (
-                                <div class={`ai-activity ${part.status}`}>
-                                  <span class="ai-activity-spinner" aria-hidden="true" />
-                                  <p>{part.status === "pending" ? "正在操作" : part.status === "completed" ? actionLabel(part.action) : "操作失败"}</p>
-                                  <strong>{part.status === "pending" || part.status === "failed" ? actionName(part.action) : ""}</strong>
-                                </div>
-                              )
-                            }
-                          </For>
-                        )}
-                        <Show when={turn.role === "assistant" && turn.completed}>
-                          <div class="ai-completion">Edition Completed!</div>
-                        </Show>
-                      </div>
+              <div class="ai-interaction-scroll">
+                <Show
+                  when={visibleAiTurns(aiHistory()).length}
+                  fallback={
+                    <div class="ai-interaction-empty">
+                      在右侧输入任务，操作记录将在这里显示。
                     </div>
-                  )}
-                </For>
-              </Show>
-              <Show when={task()}>
-                <div class="ai-task-state">{task()}</div>
+                  }
+                >
+                  <For each={visibleAiTurns(aiHistory())}>
+                    {(turn) => (
+                      <div class={`ai-turn ${turn.role}`}>
+                        <span>{turn.role === "user" ? "你" : "AI"}</span>
+                        <div class="ai-turn-body">
+                          {turn.role === "user" ? (
+                            <p>{turn.content}</p>
+                          ) : (
+                            <For each={turn.parts}>
+                              {(part) =>
+                                part.kind === "text" ? (
+                                  <p>{part.text}</p>
+                                ) : (
+                                  <div class={`ai-activity ${part.status}`}>
+                                    <span class="ai-activity-spinner" aria-hidden="true" />
+                                    <p>{part.status === "pending" ? "正在操作" : part.status === "completed" ? actionLabel(part.action) : "操作失败"}</p>
+                                    <strong>{part.status === "pending" || part.status === "failed" ? actionName(part.action) : ""}</strong>
+                                  </div>
+                                )
+                              }
+                            </For>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </Show>
+              </div>
+              <Show when={aiToast()}>
+                <div class="ai-toast">{aiToast()}</div>
               </Show>
             </div>
             <div class="ai-composer">
@@ -1086,7 +1102,7 @@ export function App() {
                 onInput={(event) => setPrompt(event.currentTarget.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey))
-                    void runAi();
+                    toggleAiRun();
                 }}
                 placeholder="输入项目操作或源码修改要求..."
               />
@@ -1103,12 +1119,21 @@ export function App() {
                 </button>
                 <button
                   class="ai-send"
-                  aria-label="发送"
-                  onClick={() => void runAi()}
+                  aria-label={aiRunning() ? "停止" : "发送"}
+                  onClick={toggleAiRun}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
-                  </svg>
+                  <Show
+                    when={aiRunning()}
+                    fallback={
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
+                      </svg>
+                    }
+                  >
+                    <svg class="ai-send-stop" viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
+                    </svg>
+                  </Show>
                 </button>
               </div>
             </div>

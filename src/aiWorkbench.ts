@@ -5,7 +5,7 @@ export type AiPart =
   | { kind: 'tool'; action: AiAction; status: 'pending' | 'completed' | 'failed' };
 export type WorkbenchTurn =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; parts: AiPart[]; completed?: boolean };
+  | { role: 'assistant'; content: string; parts: AiPart[] };
 
 export function actionLabel(action: { type: string; path?: string; from?: string; to?: string }): string {
   if (action.type === 'read_file') return `已读取 ${action.path}`;
