@@ -135,11 +135,7 @@ fn validate_action(action: &AiAction) -> Result<(), String> {
                 Err("from and to must be project-relative paths".into())
             }
         }
-        AiAction::Patch {
-            path,
-            old_text,
-            ..
-        } => {
+        AiAction::Patch { path, old_text, .. } => {
             if !path.to_lowercase().ends_with(".tex") {
                 return Err("patch is only allowed for .tex source".into());
             }

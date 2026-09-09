@@ -10,7 +10,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { projectLocation, projectNotice } from "./projectView";
-import { applyAiPatches, isSafeAiAction, type AiAction } from "./aiModel";
+import {
+  applyAiPatches,
+  isSafeAiAction,
+  preflightAiActions,
+  validateAiPatchTarget,
+  type AiAction,
+  type AiToolOperation,
+} from "./aiModel";
 import {
   buildOutlineTree,
   buildProjectTree,
@@ -548,6 +555,7 @@ export function App() {
     try {
       let step = 0;
       let done = false;
+      const toolOperations: AiToolOperation[] = [];
       while (true) {
         if (done) break;
         if (!active()) break;
@@ -569,12 +577,23 @@ export function App() {
         step += 1;
         if (!response.actions.every(isSafeAiAction))
           throw new Error("AI 返回了项目目录外操作");
-        const observations: string[] = [];
-        const parts: AiPart[] = response.segments.map((segment) =>
-          segment.kind === "text"
-            ? { kind: "text", text: segment.text }
-            : { kind: "tool", action: segment.action, status: "pending" },
+        const readPreflight = preflightAiActions(
+          response.actions,
+          toolOperations,
         );
+        const rejectedReadIndexes = new Set(
+          readPreflight.rejected.map((item) => item.index),
+        );
+        const actions = readPreflight.accepted;
+        const observations: string[] = [];
+        let actionIndex = 0;
+        const parts: AiPart[] = response.segments.flatMap((segment): AiPart[] => {
+          if (segment.kind === "text") return [{ kind: "text", text: segment.text }];
+          const currentIndex = actionIndex++;
+          return rejectedReadIndexes.has(currentIndex)
+            ? []
+            : [{ kind: "tool", action: segment.action, status: "pending" }];
+        });
         const assistantTurn: Extract<AiTurn, { role: "assistant" }> = {
           role: "assistant",
           content: response.message,
@@ -584,16 +603,17 @@ export function App() {
         context.push({ role: "assistant", content: response.message });
         setAiHistory([...history]);
         setAiContext([...context]);
-        for (let index = 0; index < response.actions.length; index += 1) {
-          const action = response.actions[index];
+        for (let index = 0; index < actions.length; index += 1) {
+          const action = actions[index];
           try {
             if (action.type === "read_file") {
               const value = await readFile(action.path);
               observations.push(`${action.path}:\n${value}`);
+              toolOperations.push({ type: "read_file", path: action.path, response: step });
             } else if (action.type === "patch") {
-              const file = workingFiles().find(
-                (item) => item.path === action.path,
-              );
+              validateAiPatchTarget(action.path, step, toolOperations);
+              toolOperations.push({ type: "patch", path: action.path, response: step });
+              const file = workingFiles().find((item) => item.path === action.path);
               if (typeof file?.content !== "string")
                 throw new Error(`无法修改 ${action.path}`);
               const updated = applyAiPatches(file.content, [action]);
@@ -633,7 +653,10 @@ export function App() {
           setAiHistory([...history]);
         }
         const toolResult = buildToolResult(
-          response.tool_errors?.map((error) => `校验失败：${error}`) ?? [],
+          [
+            ...(response.tool_errors?.map((error) => `校验失败：${error}`) ?? []),
+            ...readPreflight.rejected.map((item) => `校验失败：${item.error}`),
+          ],
           observations,
         );
         if (toolResult) {

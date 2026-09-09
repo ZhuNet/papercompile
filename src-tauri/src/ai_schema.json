@@ -13,9 +13,9 @@
   ],
   "rules": [
     "Put each action in its own tool block.",
-    "Use patch only for .tex files.",
-    "For patch, old_text must be copied exactly from a previous read_file result and must identify one location in the file.",
+    "Do not repeat read_file for the same path unless that path has been patched since the previous read.",
+    "Before patching a path, read it first; after patching it, read it again before patching it again.",
     "Keep ordinary explanations outside tool blocks and return them exactly as written.",
-    "Use Done only after every requested modification has executed successfully."
+    "Use Done immediately once tasks have completed successfully or further rounds do not need."
   ]
 }

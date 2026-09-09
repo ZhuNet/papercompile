@@ -19,6 +19,10 @@ fn builds_openai_compatible_request_with_structured_output_instruction() {
     assert!(request.system.contains("multiple actions"));
     assert!(request.system.contains("fully completed"));
     assert!(request.system.contains("main.tex"));
+    assert!(request.system.contains("Do not repeat read_file for the same path"));
+    assert!(request.system.contains("Before patching a path, read it first"));
+    assert!(!request.system.contains("include its target path"));
+    assert!(!request.system.contains("previous response"));
 }
 
 #[test]
@@ -155,7 +159,7 @@ fn excludes_invalid_tools_from_ordered_display_segments_but_keeps_the_error() {
 }
 
 #[test]
-fn accepts_a_patch_without_model_provided_character_offsets() {
+fn accepts_a_patch_with_a_model_provided_path() {
     let parsed = papercompile_core::ai::parse_mixed_response(
         "<tool>{\"type\":\"patch\",\"path\":\"main.tex\",\"old_text\":\"Old title\",\"new_text\":\"New title\"}</tool>",
     )
