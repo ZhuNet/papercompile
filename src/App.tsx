@@ -11,6 +11,11 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { projectLocation, projectNotice } from "./projectView";
 import {
+  applySourceChanges,
+  savableSourceFiles,
+  synchronizeSourceFiles,
+} from "./revisionModel";
+import {
   applyAiPatches,
   isSafeAiAction,
   preflightAiActions,
@@ -189,41 +194,34 @@ export function App() {
     project: ProjectResponse,
     renames: { from: string; to: string }[] = [],
   ) => {
-    const memory = new Map(
-      workingFiles()
-        .filter(
-          (file) =>
-            file.path.toLowerCase().endsWith(".tex") &&
-            typeof file.content === "string",
-        )
-        .map((file) => [file.path, file.content!]),
-    );
-    for (const rename of renames) {
-      const content = memory.get(rename.from);
-      if (content !== undefined) {
-        memory.delete(rename.from);
-        memory.set(rename.to, content);
-      }
-    }
-    const merged = project.files.map((file) =>
-      file.path.toLowerCase().endsWith(".tex") && memory.has(file.path)
-        ? { ...file, content: memory.get(file.path) }
-        : file,
+    const renamedWorking = workingFiles().map((file) => {
+      const rename = renames.find((item) => item.from === file.path);
+      return rename ? { ...file, path: rename.to } : file;
+    });
+    const renamedSaved = savedFiles().map((file) => {
+      const rename = renames.find((item) => item.from === file.path);
+      return rename ? { ...file, path: rename.to } : file;
+    });
+    const state = synchronizeSourceFiles(
+      project.files,
+      renamedWorking,
+      renamedSaved,
+      undoStack(),
     );
     setProjectFiles(project.files);
     setProjectFolders(project.folders ?? []);
-    setSavedFiles(project.files);
-    setWorkingFiles(merged);
+    setSavedFiles(state.saved);
+    setWorkingFiles(state.files);
+    setUndoStack(state.history);
     setEntryFile(project.entry);
-    const nextSelected = merged.some((file) => file.path === selectedFile())
+    const nextSelected = state.files.some((file) => file.path === selectedFile())
       ? selectedFile()
       : project.entry;
     setSelectedFile(nextSelected);
     setSelectedTreeItem(nextSelected);
     setSourceDraft(
-      merged.find((file) => file.path === nextSelected)?.content ?? "",
+      state.files.find((file) => file.path === nextSelected)?.content ?? "",
     );
-    setUndoStack([]);
   };
 
   const loadProject = async (root: string) => {
@@ -288,13 +286,11 @@ export function App() {
     const before =
       workingFiles().find((file) => file.path === path)?.content ?? "";
     if (before === value) return;
-    setUndoStack((items) => [...items, { path, before, after: value }]);
+    const change = { path, before, after: value };
     if (path === selectedFile()) setSourceDraft(value);
-    setWorkingFiles((files) =>
-      files.map((file) =>
-        file.path === path ? { ...file, content: value } : file,
-      ),
-    );
+    const state = applySourceChanges(workingFiles(), undoStack(), [change]);
+    setWorkingFiles(state.files);
+    setUndoStack(state.history);
   };
   const updateSource = (value: string) => editTex(selectedFile(), value);
 
@@ -313,20 +309,12 @@ export function App() {
 
   const saveProject = async (): Promise<boolean> => {
     if (!projectRoot()) return false;
-    for (const file of workingFiles()) {
-      const baseline = savedFiles().find((item) => item.path === file.path);
-      if (
-        !baseline?.content_hash ||
-        typeof baseline.content !== "string" ||
-        typeof file.content !== "string" ||
-        baseline.content === file.content
-      )
-        continue;
+    for (const file of savableSourceFiles(workingFiles(), savedFiles())) {
       try {
         await invoke("save_source", {
           root: projectRoot(),
           path: file.path,
-          expectedHash: baseline.content_hash,
+          expectedHash: file.expectedHash,
           content: file.content,
         });
       } catch (error) {
@@ -334,10 +322,8 @@ export function App() {
         return false;
       }
     }
-    if (dirty()) {
-      await refreshProjectFiles();
-      flashAiToast("项目源码已保存");
-    }
+    await refreshProjectFiles();
+    flashAiToast("项目源码已保存");
     return true;
   };
 
