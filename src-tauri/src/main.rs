@@ -19,10 +19,16 @@ fn main() {
             scan_project_command,
             read_project_file_command,
             create_project_file_with_content_command,
+            save_compiled_pdf_command,
             watch_project_command
         ])
         .run(tauri::generate_context!())
         .expect("failed to run PaperCompile");
+}
+
+#[tauri::command(rename = "save_compiled_pdf")]
+fn save_compiled_pdf_command(path: String, data: Vec<u8>) -> Result<(), String> {
+    std::fs::write(path, data).map_err(|error| error.to_string())
 }
 
 #[tauri::command(rename = "watch_project")]

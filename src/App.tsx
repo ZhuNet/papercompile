@@ -125,7 +125,6 @@ export function App() {
   const [previewZoom, setPreviewZoom] = createSignal(75);
   const [currentPdfPage, setCurrentPdfPage] = createSignal(0);
   const [totalPdfPages, setTotalPdfPages] = createSignal(0);
-  const [pageInput, setPageInput] = createSignal("1");
   const [compileError, setCompileError] = createSignal("");
   const [compiling, setCompiling] = createSignal(false);
   const [renamingPath, setRenamingPath] = createSignal("");
@@ -242,7 +241,6 @@ export function App() {
     setPreviewPage(1);
     setCurrentPdfPage(0);
     setTotalPdfPages(0);
-    setPageInput("1");
     setCompileError("");
     setCompileStatus("尚未编译");
     setUndoStack([]);
@@ -366,7 +364,6 @@ export function App() {
         setPreviewPage(1);
         setCurrentPdfPage(1);
         setTotalPdfPages(report.pages.length);
-        setPageInput("1");
         setOutline(report.outline);
         setCompileStatus(`${report.compiler} 编译通过`);
         setView("preview");
@@ -382,7 +379,6 @@ export function App() {
         setPreviewPage(1);
         setCurrentPdfPage(1);
         setTotalPdfPages(pages.length);
-        setPageInput("1");
         setOutline([]);
         setCompileStatus(`${report.compiler} 编译失败`);
         setView("preview");
@@ -394,7 +390,6 @@ export function App() {
       setPreviewPage(1);
       setCurrentPdfPage(1);
       setTotalPdfPages(pages.length);
-      setPageInput("1");
       setOutline([]);
       setCompileStatus("编译失败");
       setView("preview");
@@ -447,7 +442,6 @@ export function App() {
     setPreviewPage(target);
     setNavigationRequest((value) => value + 1);
     setCurrentPdfPage(target);
-    setPageInput(String(target));
   };
 
   const targetFolder = () => {
@@ -779,67 +773,6 @@ export function App() {
           正文
         </button>
         <span class="toolbar-spacer" />
-        <Show when={view() === "preview"}>
-          <div class="page-controls">
-            <button
-              title="第一页"
-              disabled={!totalPdfPages() || currentPdfPage() <= 1}
-              onClick={() => goToPage(1)}
-            >
-              «
-            </button>
-            <button
-              title="上一页"
-              disabled={!totalPdfPages() || currentPdfPage() <= 1}
-              onClick={() => goToPage(currentPdfPage() - 1)}
-            >
-              ‹
-            </button>
-            <input
-              aria-label="当前页"
-              value={pageInput()}
-              onInput={(event) =>
-                setPageInput(event.currentTarget.value.replace(/\D/g, ""))
-              }
-              onBlur={() => goToPage(Number(pageInput()))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") goToPage(Number(pageInput()));
-              }}
-            />
-            <span>/ {totalPdfPages() || "—"}</span>
-            <button
-              title="下一页"
-              disabled={!totalPdfPages() || currentPdfPage() >= totalPdfPages()}
-              onClick={() => goToPage(currentPdfPage() + 1)}
-            >
-              ›
-            </button>
-            <button
-              title="最后一页"
-              disabled={!totalPdfPages() || currentPdfPage() >= totalPdfPages()}
-              onClick={() => goToPage(totalPdfPages())}
-            >
-              »
-            </button>
-          </div>
-          <div class="zoom-controls">
-            <button
-              onClick={() =>
-                setPreviewZoom((value) => Math.max(25, value - 25))
-              }
-            >
-              −
-            </button>
-            <span>{previewZoom()}%</span>
-            <button
-              onClick={() =>
-                setPreviewZoom((value) => Math.min(500, value + 25))
-              }
-            >
-              ＋
-            </button>
-          </div>
-        </Show>
         <span class={`save-state ${dirty() ? "dirty" : ""}`}>
           {dirty() ? "● 有未保存源码" : "✓ 源码已保存"}
         </span>
@@ -959,7 +892,6 @@ export function App() {
                   onPageChange={(page, total) => {
                     setCurrentPdfPage(page);
                     setTotalPdfPages(total);
-                    setPageInput(String(page));
                   }}
                 />
               }
@@ -976,15 +908,10 @@ export function App() {
                 {(pdf) => (
                   <PdfPreview
                     data={pdf()}
-                    zoom={previewZoom()}
+                    entryFile={entryFile()}
                     targetPage={previewPage()}
                     navigationRequest={navigationRequest()}
-                    onZoom={setPreviewZoom}
-                    onPageChange={(page, total) => {
-                      setCurrentPdfPage(page);
-                      setTotalPdfPages(total);
-                      setPageInput(String(page));
-                    }}
+                    onPageChange={setCurrentPdfPage}
                   />
                 )}
               </Show>

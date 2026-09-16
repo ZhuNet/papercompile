@@ -1,58 +1,104 @@
-import { For, createEffect, createSignal, onCleanup } from 'solid-js';
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { currentPageFromPositions, pageSizeAtZoom, zoomFromWheel } from './compiledPreview';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
-
-type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>['promise']>;
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
+import PdfjsViewerElement from 'pdfjs-viewer-element';
+import { currentPageFromPositions, zoomFromWheel } from './compiledPreview';
+import { BlobPdfSource, pdfDownloadName, saveCompiledPdf } from './pdfViewer';
 
 export function PdfPreview(props: {
   data: Uint8Array<ArrayBuffer>;
-  zoom: number;
+  entryFile: string;
   targetPage: number;
   navigationRequest: number;
-  onZoom: (zoom: number) => void;
-  onPageChange: (page: number, total: number) => void;
+  onPageChange: (page: number) => void;
 }) {
-  const [document, setDocument] = createSignal<PdfDocument>();
-  const [pages, setPages] = createSignal<number[]>([]);
-  let container: HTMLElement | undefined;
+  let container: HTMLDivElement | undefined;
+  const [viewer, setViewer] = createSignal<PdfjsViewerElement>();
+  const [loadError, setLoadError] = createSignal('');
+  let generation = 0;
+  let disposed = false;
+  let removePageListener: (() => void) | undefined;
+  let removeDownloadListener: (() => void) | undefined;
+  const source = new BlobPdfSource();
+
+  onMount(() => {
+    const pdfjsAssets = `${import.meta.env.BASE_URL}pdfjs`;
+    const element = new PdfjsViewerElement();
+    element.setAttribute('iframe-title', 'PDF 正文查看器');
+    element.setAttribute('viewer-css-theme', 'LIGHT');
+    element.setAttribute('pagemode', 'none');
+    element.setAttribute('c-map-url', `${pdfjsAssets}/cmaps/`);
+    element.setAttribute('icc-url', `${pdfjsAssets}/iccs/`);
+    element.setAttribute('sandbox-bundle-src', `${pdfjsAssets}/build/pdf.sandbox.mjs`);
+    element.setAttribute('standard-font-data-url', `${pdfjsAssets}/standard_fonts/`);
+    element.setAttribute('wasm-url', `${pdfjsAssets}/wasm/`);
+    container?.append(element);
+    setViewer(element);
+  });
 
   createEffect(() => {
-    const task = pdfjsLib.getDocument({ data: props.data.slice() });
-    void task.promise.then((pdf) => {
-      setDocument(pdf);
-      setPages(Array.from({ length: pdf.numPages }, (_, index) => index + 1));
-      props.onPageChange(1, pdf.numPages);
-    });
-    onCleanup(() => void task.destroy());
+    const url = source.replace(props.data);
+    const filename = pdfDownloadName(props.entryFile);
+    const currentGeneration = ++generation;
+    void viewer()?.initPromise
+      .then(async ({ viewerApp }) => {
+        if (disposed || currentGeneration !== generation || !viewerApp) return;
+        if (!removePageListener) {
+          const pageChanging = ({ pageNumber }: { pageNumber: number }) => props.onPageChange(pageNumber);
+          viewerApp.eventBus.on('pagechanging', pageChanging);
+          removePageListener = () => viewerApp.eventBus.off('pagechanging', pageChanging);
+        }
+        if (!removeDownloadListener) {
+          const viewerDocument = viewer()?.iframe.contentDocument;
+          const download = (event: MouseEvent) => {
+            const target = event.target as { closest?: (selector: string) => Element | null } | null;
+            if (!target?.closest?.('#downloadButton, #secondaryDownload')) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            void saveCompiledPdf(
+              props.data,
+              pdfDownloadName(props.entryFile),
+              (defaultPath) => save({
+                defaultPath,
+                filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+              }),
+              (path, data) => invoke('save_compiled_pdf', { path, data }),
+            ).catch((error: unknown) => {
+              console.error('PDF download failed', error);
+              setLoadError(`PDF 保存失败：${String(error)}`);
+            });
+          };
+          viewerDocument?.addEventListener('click', download, true);
+          removeDownloadListener = () => viewerDocument?.removeEventListener('click', download, true);
+        }
+        await viewerApp.open({ url, originalUrl: filename });
+        setLoadError('');
+      })
+      .catch((error: unknown) => {
+        if (!disposed && currentGeneration === generation) {
+          console.error('PDF viewer failed to load', error);
+          setLoadError('PDF 查看器加载失败，请重新编译或重启应用。');
+        }
+      });
   });
 
   createEffect(() => {
     const page = props.targetPage;
     props.navigationRequest;
-    queueMicrotask(() => {
-      const target = container?.querySelector<HTMLElement>(`[data-page="${page}"]`);
-      if (container && target) container.scrollTo({ top: Math.max(0, target.offsetTop - 24), behavior: 'smooth' });
-    });
+    if (page > 0) viewer()?.setAttribute('page', String(page));
   });
 
-  const wheel = (event: WheelEvent) => {
-    if (!event.ctrlKey) return;
-    event.preventDefault();
-    props.onZoom(zoomFromWheel(props.zoom, event.deltaY, true));
-  };
-  const scroll = () => {
-    if (!container) return;
-    const pageTops = Array.from(container.querySelectorAll<HTMLElement>('[data-page]')).map((page) => page.offsetTop);
-    const page = currentPageFromPositions(container.scrollTop, container.clientHeight, pageTops);
-    if (page) props.onPageChange(page, pages().length);
-  };
+  onCleanup(() => {
+    disposed = true;
+    generation += 1;
+    removePageListener?.();
+    removeDownloadListener?.();
+    source.dispose();
+  });
 
-  return <section class="pdf-pages" ref={container} onWheel={wheel} onScroll={scroll}>
-    <For each={pages()}>{(page) => <PdfPage document={document()!} page={page} zoom={props.zoom} />}</For>
-  </section>;
+  return <div class="pdf-viewer-host" ref={container}>
+    <Show when={loadError()}>{(message) => <div class="pdf-viewer-error">{message()}</div>}</Show>
+  </div>;
 }
 
 export function TextDocumentPreview(props: {
@@ -86,64 +132,4 @@ export function TextDocumentPreview(props: {
   return <section class="pdf-pages" ref={container} onWheel={wheel} onScroll={scroll}>
     <For each={props.pages}>{(text, index) => <div class="text-document-page" data-page={index() + 1} style={{ width: `${794 * props.zoom / 100}px`, height: `${1123 * props.zoom / 100}px`, padding: `${58 * props.zoom / 100}px ${64 * props.zoom / 100}px` }}><pre style={{ "font-size": `${12 * props.zoom / 100}px` }}>{text}</pre></div>}</For>
   </section>;
-}
-
-function PdfPage(props: { document: PdfDocument; page: number; zoom: number }) {
-  let canvas: HTMLCanvasElement | undefined;
-  let textContainer: HTMLDivElement | undefined;
-  let renderTask: pdfjsLib.RenderTask | undefined;
-  let textLayer: pdfjsLib.TextLayer | undefined;
-  let generation = 0;
-  const [size, setSize] = createSignal({ width: 595, height: 842, scale: 1 });
-
-  createEffect(() => {
-    const zoom = props.zoom;
-    const currentGeneration = ++generation;
-    const previousTask = renderTask;
-    previousTask?.cancel();
-    textLayer?.cancel();
-    void (async () => {
-      if (previousTask) {
-        await previousTask.promise.catch(() => undefined);
-      }
-      const page = await props.document.getPage(props.page);
-      if (currentGeneration !== generation || !canvas) return;
-      const base = page.getViewport({ scale: 1 });
-      const dimensions = pageSizeAtZoom(base.width, base.height, zoom);
-      setSize(dimensions);
-      const displayViewport = page.getViewport({ scale: dimensions.scale });
-      const pixelRatio = window.devicePixelRatio || 1;
-      const viewport = page.getViewport({ scale: dimensions.scale * pixelRatio });
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      canvas.style.width = `${dimensions.width}px`;
-      canvas.style.height = `${dimensions.height}px`;
-      const context = canvas.getContext('2d');
-      if (!context) return;
-      renderTask = page.render({ canvas, canvasContext: context, viewport });
-      void renderTask.promise.catch((error: unknown) => {
-        if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') console.error(error);
-      });
-      if (textContainer) {
-        textContainer.replaceChildren();
-        textContainer.style.setProperty('--total-scale-factor', String(dimensions.scale));
-        textLayer = new pdfjsLib.TextLayer({
-          textContentSource: page.streamTextContent(),
-          container: textContainer,
-          viewport: displayViewport,
-        });
-        await textLayer.render();
-      }
-    })();
-    onCleanup(() => {
-      if (currentGeneration === generation) generation += 1;
-      renderTask?.cancel();
-      textLayer?.cancel();
-    });
-  });
-
-  return <div class="pdf-page-block" data-page={props.page} style={{ width: `${size().width}px` }}>
-    <canvas ref={canvas} />
-    <div class="textLayer" ref={textContainer} />
-  </div>;
 }

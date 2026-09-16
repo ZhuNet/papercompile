@@ -13,14 +13,17 @@
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2.4.0",
-    "pdfjs-dist": "^6.3.289",
+    "pdfjs-dist": "6.2.108",
+    "pdfjs-viewer-element": "4.0.2",
     "solid-js": "^1.9.9"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.8.4",
+    "@tauri-apps/cli": "2.11.4",
+    "@types/node": "^22.20.3",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
     "vite-plugin-solid": "^2.11.8",
+    "vite-plugin-static-copy": "^4.1.1",
     "vitest": "^3.2.4"
   }
 }
