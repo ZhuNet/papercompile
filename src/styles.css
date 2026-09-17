@@ -53,6 +53,7 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .source-code pre { pointer-events: none; color: #d4d4d4; }
 .source-code .source-editor { z-index: 1; resize: none; background: transparent; color: transparent; caret-color: #f8f8f2; -webkit-text-fill-color: transparent; }
 .source-code .source-editor::selection { background: #264f78; }
+.syntax-heading { color: #569cd6; font-weight: 700; }.syntax-list, .syntax-quote { color: #c586c0; }.syntax-link { color: #4ec9b0; }.syntax-code { color: #ce9178; }.syntax-key { color: #9cdcfe; }.syntax-literal, .syntax-number { color: #b5cea8; }
 .syntax-comment { color: #6a9955; }
 .syntax-command { color: #569cd6; }
 .syntax-brace { color: #dcdcaa; }

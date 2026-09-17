@@ -3,11 +3,31 @@ import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import PdfjsViewerElement from 'pdfjs-viewer-element';
 import { currentPageFromPositions, zoomFromWheel } from './compiledPreview';
-import { BlobPdfSource, pdfDownloadName, saveCompiledPdf } from './pdfViewer';
+import {
+  BlobPdfSource,
+  normalizePdfReadingState,
+  pdfDownloadName,
+  saveCompiledPdf,
+  type PdfReadingState,
+} from './pdfViewer';
+
+type ViewerEventBus = {
+  on: (name: string, listener: () => void) => void;
+  off: (name: string, listener: () => void) => void;
+};
+
+type ViewerApplication = {
+  eventBus: ViewerEventBus;
+  open: (params: { url: string; originalUrl: string }) => void | Promise<void>;
+  pdfDocument?: { numPages: number };
+  pdfViewer?: { currentPageNumber: number; currentScaleValue: string };
+};
 
 export function PdfPreview(props: {
   data: Uint8Array<ArrayBuffer>;
   entryFile: string;
+  readingState: PdfReadingState;
+  onReadingState: (state: PdfReadingState) => void;
 }) {
   let container: HTMLDivElement | undefined;
   const [viewer, setViewer] = createSignal<PdfjsViewerElement>();
@@ -15,6 +35,7 @@ export function PdfPreview(props: {
   let generation = 0;
   let disposed = false;
   let removeDownloadListener: (() => void) | undefined;
+  let removeViewerListeners: (() => void) | undefined;
   const source = new BlobPdfSource();
 
   onMount(() => {
@@ -37,7 +58,8 @@ export function PdfPreview(props: {
     const filename = pdfDownloadName(props.entryFile);
     const currentGeneration = ++generation;
     void viewer()?.initPromise
-      .then(async ({ viewerApp }) => {
+      .then(async ({ viewerApp: rawViewerApp }) => {
+        const viewerApp = rawViewerApp as ViewerApplication | undefined;
         if (disposed || currentGeneration !== generation || !viewerApp) return;
         if (!removeDownloadListener) {
           const viewerDocument = viewer()?.iframe.contentDocument;
@@ -62,6 +84,40 @@ export function PdfPreview(props: {
           viewerDocument?.addEventListener('click', download, true);
           removeDownloadListener = () => viewerDocument?.removeEventListener('click', download, true);
         }
+        const viewerDocument = viewer()?.iframe.contentDocument;
+        const viewerContainer = () => viewerDocument?.querySelector<HTMLElement>('#viewerContainer');
+        const captureReadingState = () => {
+          const pdfViewer = viewerApp.pdfViewer;
+          const container = viewerContainer();
+          if (!pdfViewer || !container) return;
+          const page = pdfViewer.currentPageNumber || 1;
+          const pageElement = viewerDocument?.querySelector<HTMLElement>(`.page[data-page-number="${page}"]`);
+          props.onReadingState({
+            page,
+            pageOffset: Math.max(0, container.scrollTop - (pageElement?.offsetTop ?? 0)),
+            scale: pdfViewer.currentScaleValue || 'auto',
+          });
+        };
+        const restoreReadingState = () => {
+          const pdfViewer = viewerApp.pdfViewer;
+          const totalPages = viewerApp.pdfDocument?.numPages ?? 0;
+          if (!pdfViewer || !totalPages) return;
+          const state = normalizePdfReadingState(props.readingState, totalPages);
+          pdfViewer.currentScaleValue = state.scale;
+          pdfViewer.currentPageNumber = state.page;
+          requestAnimationFrame(() => {
+            const container = viewerContainer();
+            const pageElement = viewerDocument?.querySelector<HTMLElement>(`.page[data-page-number="${state.page}"]`);
+            if (container && pageElement) container.scrollTop = pageElement.offsetTop + state.pageOffset;
+          });
+        };
+        removeViewerListeners?.();
+        viewerApp.eventBus.on('updateviewarea', captureReadingState);
+        viewerApp.eventBus.on('pagesinit', restoreReadingState);
+        removeViewerListeners = () => {
+          viewerApp.eventBus.off('updateviewarea', captureReadingState);
+          viewerApp.eventBus.off('pagesinit', restoreReadingState);
+        };
         await viewerApp.open({ url, originalUrl: filename });
         setLoadError('');
       })
@@ -77,6 +133,7 @@ export function PdfPreview(props: {
     disposed = true;
     generation += 1;
     removeDownloadListener?.();
+    removeViewerListeners?.();
     source.dispose();
   });
 

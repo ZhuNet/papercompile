@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { BlobPdfSource, pdfDownloadName, saveCompiledPdf } from './pdfViewer';
+import {
+  BlobPdfSource,
+  compiledPdfDocument,
+  normalizePdfReadingState,
+  pdfDownloadName,
+  saveCompiledPdf,
+} from './pdfViewer';
 
 describe('pdfDownloadName', () => {
   it('uses the LaTeX entry filename for the compiled PDF download', () => {
@@ -33,6 +39,32 @@ describe('BlobPdfSource', () => {
     source.dispose();
 
     expect(revoked).toEqual(['blob:active']);
+  });
+});
+
+describe('normalizePdfReadingState', () => {
+  it('keeps the page, page offset, and scale for a refreshed PDF', () => {
+    expect(normalizePdfReadingState({ page: 4, pageOffset: 180, scale: '1.5' }, 8)).toEqual({
+      page: 4,
+      pageOffset: 180,
+      scale: '1.5',
+    });
+  });
+
+  it('clamps the restored page when the refreshed PDF has fewer pages', () => {
+    expect(normalizePdfReadingState({ page: 9, pageOffset: 40, scale: 'page-width' }, 3)).toEqual({
+      page: 3,
+      pageOffset: 40,
+      scale: 'page-width',
+    });
+  });
+});
+
+describe('compiledPdfDocument', () => {
+  it('gives every successful compilation a new viewer identity', () => {
+    const data = new Uint8Array([1, 2, 3]);
+
+    expect(compiledPdfDocument(data, 4)).toEqual({ data, revision: 5 });
   });
 });
 

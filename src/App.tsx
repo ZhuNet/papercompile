@@ -35,7 +35,13 @@ import {
   paginateText,
 } from "./compiledPreview";
 import { PdfPreview, TextDocumentPreview } from "./PdfPreview";
-import { highlightLatex } from "./latexSyntax";
+import { SourceScrollPositions, type SourceScrollPosition } from "./sourceView";
+import { highlightText, textLanguageForPath } from "./textSyntax";
+import {
+  compiledPdfDocument,
+  type CompiledPdfDocument,
+  type PdfReadingState,
+} from "./pdfViewer";
 import {
   actionLabel,
   actionName,
@@ -116,7 +122,12 @@ export function App() {
   const [entryFile, setEntryFile] = createSignal("");
   const [compileStatus, setCompileStatus] = createSignal("尚未编译");
   const [compileReport, setCompileReport] = createSignal<CompileReport>();
-  const [compiledPdf, setCompiledPdf] = createSignal<Uint8Array<ArrayBuffer>>();
+  const [compiledPdf, setCompiledPdf] = createSignal<CompiledPdfDocument>();
+  const [pdfReadingState, setPdfReadingState] = createSignal<PdfReadingState>({
+    page: 1,
+    pageOffset: 0,
+    scale: "auto",
+  });
   const [previewZoom, setPreviewZoom] = createSignal(75);
   const [compileError, setCompileError] = createSignal("");
   const [compiling, setCompiling] = createSignal(false);
@@ -128,6 +139,7 @@ export function App() {
   const [savedFiles, setSavedFiles] = createSignal<ProjectFile[]>([]);
   const [workingFiles, setWorkingFiles] = createSignal<ProjectFile[]>([]);
   const [undoStack, setUndoStack] = createSignal<HistoryEntry[]>([]);
+  const sourceScrollPositions = new SourceScrollPositions();
   const aiDefaults = loadAiPreferences({
     endpoint: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
@@ -228,6 +240,8 @@ export function App() {
     );
     setCompileReport();
     setCompiledPdf();
+    setPdfReadingState({ page: 1, pageOffset: 0, scale: "auto" });
+    sourceScrollPositions.clear();
     setCompileError("");
     setCompileStatus("尚未编译");
     setUndoStack([]);
@@ -346,7 +360,12 @@ export function App() {
       if (report.success) {
         if (!report.pdf_data) throw new Error("编译器未返回 PDF 内容");
         setCompileReport(report);
-        setCompiledPdf(decodeBase64(report.pdf_data));
+        setCompiledPdf((current) =>
+          compiledPdfDocument(
+            decodeBase64(report.pdf_data!),
+            current?.revision ?? 0,
+          ),
+        );
         setCompileError("");
         setCompileStatus(`${report.compiler} 编译通过`);
         setView("preview");
@@ -822,6 +841,10 @@ export function App() {
                   (file) => file.path === selectedFile(),
                 )?.content === "string"
               }
+              scrollPosition={sourceScrollPositions.get(selectedFile())}
+              onScrollPosition={(position) =>
+                sourceScrollPositions.set(selectedFile(), position)
+              }
               onInput={updateSource}
             />
           }
@@ -842,6 +865,7 @@ export function App() {
             >
               <Show
                 when={compiledPdf()}
+                keyed
                 fallback={
                   <div class="preview-empty">
                     <strong>尚无编译结果</strong>
@@ -851,8 +875,10 @@ export function App() {
               >
                 {(pdf) => (
                   <PdfPreview
-                    data={pdf()}
+                    data={pdf.data}
                     entryFile={entryFile()}
+                    readingState={pdfReadingState()}
+                    onReadingState={setPdfReadingState}
                   />
                 )}
               </Show>
@@ -868,7 +894,7 @@ export function App() {
             <span>{projectFiles().length} 个文件</span>
           </div>
           <div class="empty-state">
-            编辑只发生在 LaTeX 源码中。
+            编辑只发生在项目文本文件中。
             <br />
             <small>编译不会保存源码，正文仅用于展示。</small>
           </div>
@@ -1087,20 +1113,39 @@ function SourceView(props: {
   path: string;
   content: string;
   editable: boolean;
+  scrollPosition: SourceScrollPosition;
+  onScrollPosition: (position: SourceScrollPosition) => void;
   onInput: (value: string) => void;
 }) {
+  let editor: HTMLTextAreaElement | undefined;
+  const language = () => textLanguageForPath(props.path);
+  createEffect(() => {
+    props.path;
+    const position = props.scrollPosition;
+    queueMicrotask(() => {
+      if (!editor) return;
+      editor.scrollTop = position.top;
+      editor.scrollLeft = position.left;
+      const pre = editor.previousElementSibling as HTMLElement | null;
+      if (pre) {
+        pre.scrollTop = position.top;
+        pre.scrollLeft = position.left;
+      }
+    });
+  });
   return (
     <article class="source-wrap">
       <div class="source-header">
         <span>{props.path || "未选择文件"}</span>
-        <span>{props.editable ? "LaTeX 项目源码" : "二进制资源 · 只读"}</span>
+        <span>{props.editable ? language().label : "二进制资源 · 只读"}</span>
       </div>
       <div class="source-code">
         <pre
           aria-hidden="true"
-          innerHTML={`${highlightLatex(props.content)}\n`}
+          innerHTML={`${highlightText(props.content, language().language)}\n`}
         />
         <textarea
+          ref={editor}
           class="source-editor"
           readOnly={!props.editable}
           value={props.content}
@@ -1110,6 +1155,10 @@ function SourceView(props: {
               .previousElementSibling as HTMLElement;
             pre.scrollTop = event.currentTarget.scrollTop;
             pre.scrollLeft = event.currentTarget.scrollLeft;
+            props.onScrollPosition({
+              top: event.currentTarget.scrollTop,
+              left: event.currentTarget.scrollLeft,
+            });
           }}
           placeholder={
             props.path ? "此资源不能作为文本编辑" : "打开项目后选择源码文件"

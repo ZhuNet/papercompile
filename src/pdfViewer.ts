@@ -4,6 +4,35 @@ export function pdfDownloadName(entryFile: string): string {
   return `${stem || 'document'}.pdf`;
 }
 
+export type PdfReadingState = {
+  page: number;
+  pageOffset: number;
+  scale: string;
+};
+
+export type CompiledPdfDocument = {
+  data: Uint8Array<ArrayBuffer>;
+  revision: number;
+};
+
+export function compiledPdfDocument(
+  data: Uint8Array<ArrayBuffer>,
+  previousRevision: number,
+): CompiledPdfDocument {
+  return { data, revision: previousRevision + 1 };
+}
+
+export function normalizePdfReadingState(
+  state: PdfReadingState,
+  totalPages: number,
+): PdfReadingState {
+  return {
+    page: totalPages > 0 ? Math.max(1, Math.min(totalPages, Math.trunc(state.page) || 1)) : 1,
+    pageOffset: Math.max(0, state.pageOffset),
+    scale: state.scale || 'auto',
+  };
+}
+
 export async function saveCompiledPdf(
   data: Uint8Array<ArrayBuffer>,
   filename: string,
