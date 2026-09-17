@@ -13,11 +13,14 @@ describe('compileSources', () => {
       { path: 'main.tex', content: '\\documentclass{article}' },
       { path: 'empty.tex', content: '' },
       { path: 'references.bib', content: '@article{x}' },
+      { path: 'settings.json', content: '{"draft":true}' },
       { path: 'figure.png', content: null },
       { path: 'missing.bin' },
     ])).toEqual([
       { path: 'main.tex', content: '\\documentclass{article}' },
       { path: 'empty.tex', content: '' },
+      { path: 'references.bib', content: '@article{x}' },
+      { path: 'settings.json', content: '{"draft":true}' },
     ]);
   });
 });

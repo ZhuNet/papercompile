@@ -6,7 +6,7 @@ export function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
 }
 
 export function compileSources(files: { path: string; content?: string | null }[]): { path: string; content: string }[] {
-  return files.flatMap((file) => typeof file.content === 'string' && file.path.toLowerCase().endsWith('.tex')
+  return files.flatMap((file) => typeof file.content === 'string'
     ? [{ path: file.path, content: file.content }]
     : []);
 }
