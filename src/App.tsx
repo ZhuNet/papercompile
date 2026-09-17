@@ -24,14 +24,11 @@ import {
   type AiToolOperation,
 } from "./aiModel";
 import {
-  buildOutlineTree,
   buildProjectTree,
   parentFolder,
-  type OutlineTreeNode,
   type ProjectTreeNode,
 } from "./projectTree";
 import {
-  clampPage,
   compileFailureText,
   compileSources,
   decodeBase64,
@@ -120,17 +117,12 @@ export function App() {
   const [compileStatus, setCompileStatus] = createSignal("尚未编译");
   const [compileReport, setCompileReport] = createSignal<CompileReport>();
   const [compiledPdf, setCompiledPdf] = createSignal<Uint8Array<ArrayBuffer>>();
-  const [previewPage, setPreviewPage] = createSignal(1);
-  const [navigationRequest, setNavigationRequest] = createSignal(0);
   const [previewZoom, setPreviewZoom] = createSignal(75);
-  const [currentPdfPage, setCurrentPdfPage] = createSignal(0);
-  const [totalPdfPages, setTotalPdfPages] = createSignal(0);
   const [compileError, setCompileError] = createSignal("");
   const [compiling, setCompiling] = createSignal(false);
   const [renamingPath, setRenamingPath] = createSignal("");
   const [renameValue, setRenameValue] = createSignal("");
   const [lastProjectSignature, setLastProjectSignature] = createSignal("");
-  const [outline, setOutline] = createSignal<OutlineItem[]>([]);
   const [projectName, setProjectName] = createSignal("尚未打开项目");
   const [sourceDraft, setSourceDraft] = createSignal("");
   const [savedFiles, setSavedFiles] = createSignal<ProjectFile[]>([]);
@@ -167,7 +159,6 @@ export function App() {
       projectFolders(),
     ),
   );
-  const outlineTree = createMemo(() => buildOutlineTree(outline()));
 
   let aiToastTimer: ReturnType<typeof setTimeout> | undefined;
   let aiRunToken = 0;
@@ -235,12 +226,8 @@ export function App() {
     setSourceDraft(
       project.files.find((file) => file.path === project.entry)?.content ?? "",
     );
-    setOutline([]);
     setCompileReport();
     setCompiledPdf();
-    setPreviewPage(1);
-    setCurrentPdfPage(0);
-    setTotalPdfPages(0);
     setCompileError("");
     setCompileStatus("尚未编译");
     setUndoStack([]);
@@ -361,10 +348,6 @@ export function App() {
         setCompileReport(report);
         setCompiledPdf(decodeBase64(report.pdf_data));
         setCompileError("");
-        setPreviewPage(1);
-        setCurrentPdfPage(1);
-        setTotalPdfPages(report.pages.length);
-        setOutline(report.outline);
         setCompileStatus(`${report.compiler} 编译通过`);
         setView("preview");
       } else {
@@ -374,23 +357,13 @@ export function App() {
           report.diagnostics,
           report.log,
         );
-        const pages = paginateText(error);
         setCompileError(error);
-        setPreviewPage(1);
-        setCurrentPdfPage(1);
-        setTotalPdfPages(pages.length);
-        setOutline([]);
         setCompileStatus(`${report.compiler} 编译失败`);
         setView("preview");
       }
     } catch (error) {
       const message = `编译失败\n\n${String(error)}`;
-      const pages = paginateText(message);
       setCompileError(message);
-      setPreviewPage(1);
-      setCurrentPdfPage(1);
-      setTotalPdfPages(pages.length);
-      setOutline([]);
       setCompileStatus("编译失败");
       setView("preview");
     } finally {
@@ -436,14 +409,6 @@ export function App() {
       flashAiToast(`文件操作失败 · ${String(error)}`);
     }
   };
-  const goToPage = (page: number) => {
-    const target = clampPage(page, totalPdfPages());
-    if (!target) return;
-    setPreviewPage(target);
-    setNavigationRequest((value) => value + 1);
-    setCurrentPdfPage(target);
-  };
-
   const targetFolder = () => {
     const selected = selectedTreeItem();
     if (projectFolders().includes(selected)) return selected;
@@ -782,24 +747,9 @@ export function App() {
       </nav>
       <section class="workspace">
         <aside class="outline">
-          <h2>大纲</h2>
-          <Show
-            when={outlineTree().length}
-            fallback={<div class="outline-empty">PDF 未包含目录书签</div>}
-          >
-            <For each={outlineTree()}>
-              {(item) => (
-                <OutlineNode
-                  node={item}
-                  activePage={currentPdfPage()}
-                  onSelect={(page) => {
-                    goToPage(page);
-                    setView("preview");
-                  }}
-                />
-              )}
-            </For>
-          </Show>
+          <div class="files-heading">
+            <strong>项目文件</strong>
+          </div>
           <div class="file-actions file-operation-row">
             <button title="新建文件" aria-label="新建文件" onClick={createFile}>
               <svg viewBox="0 0 24 24">
@@ -834,9 +784,6 @@ export function App() {
                 <path d="M5 7h14M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" />
               </svg>
             </button>
-          </div>
-          <div class="files-heading">
-            <strong>项目文件</strong>
           </div>
           <div class="file-tree">
             <For each={fileTree()}>
@@ -886,13 +833,10 @@ export function App() {
                 <TextDocumentPreview
                   pages={paginateText(compileError())}
                   zoom={previewZoom()}
-                  targetPage={previewPage()}
-                  navigationRequest={navigationRequest()}
+                  targetPage={1}
+                  navigationRequest={0}
                   onZoom={setPreviewZoom}
-                  onPageChange={(page, total) => {
-                    setCurrentPdfPage(page);
-                    setTotalPdfPages(total);
-                  }}
+                  onPageChange={() => undefined}
                 />
               }
             >
@@ -909,9 +853,6 @@ export function App() {
                   <PdfPreview
                     data={pdf()}
                     entryFile={entryFile()}
-                    targetPage={previewPage()}
-                    navigationRequest={navigationRequest()}
-                    onPageChange={setCurrentPdfPage}
                   />
                 )}
               </Show>
@@ -929,7 +870,7 @@ export function App() {
           <div class="empty-state">
             编辑只发生在 LaTeX 源码中。
             <br />
-            <small>编译不会保存源码，正文和大纲仅用于展示。</small>
+            <small>编译不会保存源码，正文仅用于展示。</small>
           </div>
         </aside>
       </section>
@@ -1132,50 +1073,6 @@ function FileTreeNode(props: {
                 renameValue={props.renameValue}
                 onRenameValue={props.onRenameValue}
                 onCommitRename={props.onCommitRename}
-                onSelect={props.onSelect}
-              />
-            )}
-          </For>
-        </div>
-      </Show>
-    </div>
-  );
-}
-
-function OutlineNode(props: {
-  node: OutlineTreeNode;
-  activePage: number;
-  onSelect: (page: number) => void;
-}) {
-  const [expanded, setExpanded] = createSignal(true);
-  const hasChildren = () => props.node.children.length > 0;
-  return (
-    <div class="outline-branch">
-      <div
-        class={`outline-row ${props.activePage === props.node.page ? "current" : ""}`}
-      >
-        <button
-          class="outline-toggle"
-          disabled={!hasChildren()}
-          onClick={() => setExpanded(!expanded())}
-        >
-          {hasChildren() ? (expanded() ? "▾" : "▸") : ""}
-        </button>
-        <button
-          class="outline-label"
-          title={props.node.title}
-          onClick={() => props.onSelect(props.node.page)}
-        >
-          {props.node.title}
-        </button>
-      </div>
-      <Show when={hasChildren() && expanded()}>
-        <div class="outline-children">
-          <For each={props.node.children}>
-            {(child) => (
-              <OutlineNode
-                node={child}
-                activePage={props.activePage}
                 onSelect={props.onSelect}
               />
             )}

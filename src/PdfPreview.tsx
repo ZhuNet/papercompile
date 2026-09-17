@@ -8,16 +8,12 @@ import { BlobPdfSource, pdfDownloadName, saveCompiledPdf } from './pdfViewer';
 export function PdfPreview(props: {
   data: Uint8Array<ArrayBuffer>;
   entryFile: string;
-  targetPage: number;
-  navigationRequest: number;
-  onPageChange: (page: number) => void;
 }) {
   let container: HTMLDivElement | undefined;
   const [viewer, setViewer] = createSignal<PdfjsViewerElement>();
   const [loadError, setLoadError] = createSignal('');
   let generation = 0;
   let disposed = false;
-  let removePageListener: (() => void) | undefined;
   let removeDownloadListener: (() => void) | undefined;
   const source = new BlobPdfSource();
 
@@ -43,11 +39,6 @@ export function PdfPreview(props: {
     void viewer()?.initPromise
       .then(async ({ viewerApp }) => {
         if (disposed || currentGeneration !== generation || !viewerApp) return;
-        if (!removePageListener) {
-          const pageChanging = ({ pageNumber }: { pageNumber: number }) => props.onPageChange(pageNumber);
-          viewerApp.eventBus.on('pagechanging', pageChanging);
-          removePageListener = () => viewerApp.eventBus.off('pagechanging', pageChanging);
-        }
         if (!removeDownloadListener) {
           const viewerDocument = viewer()?.iframe.contentDocument;
           const download = (event: MouseEvent) => {
@@ -82,16 +73,9 @@ export function PdfPreview(props: {
       });
   });
 
-  createEffect(() => {
-    const page = props.targetPage;
-    props.navigationRequest;
-    if (page > 0) viewer()?.setAttribute('page', String(page));
-  });
-
   onCleanup(() => {
     disposed = true;
     generation += 1;
-    removePageListener?.();
     removeDownloadListener?.();
     source.dispose();
   });
