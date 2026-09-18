@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNavigationTree, selectTreeIndex } from './documentTree';
+import { buildNavigationTree, selectTreeIndex } from '../documentTree';
 
 describe('document tree navigation', () => {
   const body = [

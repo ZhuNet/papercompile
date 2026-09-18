@@ -5,7 +5,7 @@ import {
   normalizePdfReadingState,
   pdfDownloadName,
   saveCompiledPdf,
-} from './pdfViewer';
+} from '../pdfViewer';
 
 describe('pdfDownloadName', () => {
   it('uses the LaTeX entry filename for the compiled PDF download', () => {

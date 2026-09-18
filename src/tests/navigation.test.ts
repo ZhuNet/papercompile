@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nodeNavigationId, outlineNavigationId } from './navigation';
+import { nodeNavigationId, outlineNavigationId } from '../navigation';
 
 describe('document navigation', () => {
   it('uses file and source range so duplicate titles do not collide', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampPage, compileFailureText, compileSources, currentPageFromPositions, decodeBase64, paginateText, pageSizeAtZoom, zoomFromWheel } from './compiledPreview';
+import { clampPage, compileFailureText, compileSources, currentPageFromPositions, decodeBase64, paginateText, pageSizeAtZoom, zoomFromWheel } from '../compiledPreview';
 
 describe('decodeBase64', () => {
   it('turns compiler PDF data into browser bytes', () => {

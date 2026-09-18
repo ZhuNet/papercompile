@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { highlightLatex } from './latexSyntax';
+import { highlightLatex } from '../latexSyntax';
 
 describe('highlightLatex', () => {
   it('highlights LaTeX commands, braces, options, and comments', () => {

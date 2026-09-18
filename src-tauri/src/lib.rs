@@ -1,4 +1,4 @@
-pub mod ai;
+pub mod agent_sidecar;
 pub mod compiler;
 pub mod core;
 pub mod latex;

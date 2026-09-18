@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { outlineNavigation } from './outlineView';
+import { outlineNavigation } from '../outlineView';
 
 describe('outline navigation', () => {
   it('keeps the outline as read-only navigation data', () => {

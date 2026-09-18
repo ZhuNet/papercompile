@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applySourceChanges, compactDiff, createHistory, diffFile, rejectFileChange, savableSourceFiles, sourceBaseline, sourceChanges, sourceWorkingFiles, synchronizeSourceFiles } from './revisionModel';
+import { applySourceChanges, compactDiff, createHistory, diffFile, rejectFileChange, savableSourceFiles, sourceBaseline, sourceChanges, sourceWorkingFiles, synchronizeSourceFiles } from '../revisionModel';
 
 describe('revision model', () => {
   it('creates a saved revision from the disk baseline and working copy', () => {

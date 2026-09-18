@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SourceScrollPositions } from './sourceView';
+import { SourceScrollPositions } from '../sourceView';
 
 describe('SourceScrollPositions', () => {
   it('stores an independent scroll position for each source file', () => {

@@ -6,12 +6,16 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build:desktop",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [{ "title": "PaperCompile", "width": 1440, "height": 960 }],
     "security": { "csp": null }
   },
-  "bundle": { "active": false }
+  "bundle": {
+    "active": true,
+    "externalBin": ["binaries/papercompile-agent"],
+    "resources": ["binaries/*.node"]
+  }
 }

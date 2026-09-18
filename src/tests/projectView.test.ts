@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectViewFromResponse, contentForPath, projectLocation, projectNotice } from './projectView';
+import { projectViewFromResponse, contentForPath, projectLocation, projectNotice } from '../projectView';
 
 describe('projectViewFromResponse', () => {
   it('uses the entry file content and lists discovered project files', () => {

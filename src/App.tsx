@@ -10,6 +10,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { projectLocation } from "./projectView";
 import { operationErrorReason, type OperationKind } from "./operationMessage";
 import {
@@ -17,14 +18,6 @@ import {
   savableSourceFiles,
   synchronizeSourceFiles,
 } from "./revisionModel";
-import {
-  applyAiPatches,
-  isSafeAiAction,
-  preflightAiActions,
-  validateAiPatchTarget,
-  type AiAction,
-  type AiToolOperation,
-} from "./aiModel";
 import {
   buildProjectTree,
   isValidProjectItemName,
@@ -46,34 +39,13 @@ import {
   type PdfReadingState,
 } from "./pdfViewer";
 import {
-  actionLabel,
-  actionName,
-  buildToolResult,
-  loadAiPreferences,
-  saveAiPreferences,
-  setToolPartStatus,
-  visibleAiTurns,
-} from "./aiWorkbench";
-import type { AiPart } from "./aiWorkbench";
-
-type AiResponse = {
-  id: string;
-  message: string;
-  segments: (
-    | { kind: "text"; text: string }
-    | { kind: "tool"; action: AiAction }
-  )[];
-  actions: AiAction[];
-  tool_errors?: string[];
-  done?: boolean;
-};
-type AiTurn =
-  | { role: "user"; content: string }
-  | {
-      role: "assistant";
-      content: string;
-      parts: AiPart[];
-    };
+  applyAgentEvent,
+  loadAgentPreferences,
+  saveAgentPreferences,
+  type AgentEvent,
+  type AgentWorkbenchState,
+  type LlmProfile,
+} from "./agentWorkbench";
 type ProjectFile = {
   path: string;
   content?: string | null;
@@ -113,7 +85,6 @@ export function App() {
     text: string;
     tone: "success" | "warning" | "error";
   }>();
-  const [aiRunning, setAiRunning] = createSignal(false);
   const [projectFiles, setProjectFiles] = createSignal<ProjectFile[]>([]);
   const [projectFolders, setProjectFolders] = createSignal<string[]>([]);
   const [selectedFile, setSelectedFile] = createSignal("");
@@ -142,24 +113,22 @@ export function App() {
   const [workingFiles, setWorkingFiles] = createSignal<ProjectFile[]>([]);
   const [undoStack, setUndoStack] = createSignal<HistoryEntry[]>([]);
   const sourceScrollPositions = new SourceScrollPositions();
-  const aiDefaults = loadAiPreferences({
-    endpoint: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
-    key: "",
-  });
-  const [aiEndpoint, setAiEndpoint] = createSignal(aiDefaults.endpoint);
-  const [aiModel, setAiModel] = createSignal(aiDefaults.model);
-  const [aiKey, setAiKey] = createSignal(aiDefaults.key);
-  const [aiHistory, setAiHistory] = createSignal<AiTurn[]>([]);
-  const [aiContext, setAiContext] = createSignal<
-    { role: "user" | "assistant"; content: string }[]
-  >([]);
+  const initialAgentPreferences = loadAgentPreferences();
+  const [llmProfiles, setLlmProfiles] = createSignal<LlmProfile[]>(initialAgentPreferences.profiles);
+  const [projectAgentPreferences, setProjectAgentPreferences] = createSignal(initialAgentPreferences.projects);
+  const [selectedLlmId, setSelectedLlmId] = createSignal("");
+  const [agentSessionId, setAgentSessionId] = createSignal("");
+  const [activeRunId, setActiveRunId] = createSignal("");
+  const [agentReady, setAgentReady] = createSignal(false);
+  const [agentStatus, setAgentStatus] = createSignal("正在连接 Agent...");
+  const emptyAgentState = (): AgentWorkbenchState => ({ messages: [], tools: [], interactions: [], rawEvents: [], timeline: [], running: false });
+  const [agentState, setAgentState] = createSignal<AgentWorkbenchState>(emptyAgentState());
+  const aiRunning = createMemo(() => agentState().running);
   const [aiSettingsOpen, setAiSettingsOpen] = createSignal(false);
-  const [appliedAiConfig, setAppliedAiConfig] = createSignal({
-    endpoint: aiEndpoint(),
-    model: aiModel(),
-    key: aiKey(),
-  });
+  const [profileName, setProfileName] = createSignal("");
+  const [aiEndpoint, setAiEndpoint] = createSignal("");
+  const [aiModel, setAiModel] = createSignal("");
+  const [aiKey, setAiKey] = createSignal("");
   const dirty = createMemo(() =>
     workingFiles().some(
       (file) =>
@@ -175,7 +144,6 @@ export function App() {
   );
 
   let toolbarMessageTimer: ReturnType<typeof setTimeout> | undefined;
-  let aiRunToken = 0;
   const showToolbarMessage = (
     text: string,
     tone: "success" | "warning" | "error",
@@ -188,6 +156,118 @@ export function App() {
     );
   };
   onCleanup(() => clearTimeout(toolbarMessageTimer));
+
+  const sendAgentCommand = (command: Record<string, unknown>) =>
+    invoke("send_agent_command", { command });
+  const persistAgentPreferences = (
+    profiles = llmProfiles(),
+    projects = projectAgentPreferences(),
+  ) => saveAgentPreferences({ profiles, projects });
+  const selectedLlm = createMemo(() =>
+    llmProfiles().find((profile) => profile.id === selectedLlmId()),
+  );
+  let openingAgentSession = false;
+  const openAgentSession = async () => {
+    const root = projectRoot();
+    const profile = selectedLlm();
+    if (!agentReady() || !root || !profile || aiRunning() || openingAgentSession || agentSessionId()) return;
+    openingAgentSession = true;
+    setAgentStatus("正在恢复 Oh My Pi 会话...");
+    try {
+      await sendAgentCommand({
+        type: "open_session",
+        requestId: crypto.randomUUID(),
+        projectRoot: root,
+        agentId: "omp",
+        profile,
+      });
+    } finally {
+      openingAgentSession = false;
+    }
+  };
+
+  onMount(() => {
+    const unlisteners: Promise<() => void>[] = [];
+    unlisteners.push(listen<AgentEvent>("agent-event", async ({ payload }) => {
+      if (payload.type === "ready") {
+        setAgentReady(true);
+        setAgentStatus("Oh My Pi 已连接");
+        await openAgentSession();
+        return;
+      }
+      if (payload.type === "session_opened") {
+        setAgentSessionId(String(payload.sessionId ?? ""));
+        const history = Array.isArray(payload.history) ? payload.history : [];
+        const messages = history.flatMap((message, index) => {
+          if (!message || typeof message !== "object") return [];
+          const role = "role" in message ? String(message.role) : "";
+          const content = "content" in message ? message.content : "";
+          const text = typeof content === "string"
+            ? content
+            : Array.isArray(content)
+              ? content.flatMap(part => part && typeof part === "object" && "text" in part ? [String(part.text)] : []).join("")
+              : "";
+          if (!text || (role !== "user" && role !== "assistant")) return [];
+          return [{ id: `history-${index}`, role: role as "user" | "assistant", text }];
+        });
+        const rawEvents = history.length ? [{ id: "raw-history", name: "OMP 会话原始历史", payload: history, expanded: false }] : [];
+        setAgentState({
+          ...emptyAgentState(),
+          messages,
+          rawEvents,
+          timeline: [
+            ...messages.map(message => ({ kind: "message" as const, id: message.id })),
+            ...rawEvents.map(event => ({ kind: "raw" as const, id: event.id })),
+          ],
+        });
+        setAgentStatus("Oh My Pi 会话已恢复");
+        return;
+      }
+      if (payload.type === "interaction_requested") {
+        setAgentState(state => applyAgentEvent(state, payload));
+        return;
+      }
+      if (payload.type === "error") {
+        setAgentStatus(String(payload.message ?? "Agent 发生错误"));
+        showToolbarMessage(`Agent 操作失败：${String(payload.message ?? "未知错误")}`, "error");
+      }
+      setAgentState(state => applyAgentEvent(state, payload));
+      if (payload.type === "run_finished" || payload.type === "run_aborted") setActiveRunId("");
+    }));
+    unlisteners.push(listen<string>("agent-protocol-error", ({ payload }) => setAgentStatus(`Agent 协议错误：${payload}`)));
+    unlisteners.push(listen<string>("agent-sidecar-exited", () => {
+      setAgentReady(false);
+      setAgentStatus("Agent 进程已退出");
+    }));
+    onCleanup(() => { void Promise.all(unlisteners).then(items => items.forEach(unlisten => unlisten())); });
+    void invoke<string>("agent_sidecar_status").then(status => {
+      if (status === "running") setAgentStatus("正在等待 Oh My Pi...");
+    });
+    void invoke<AgentEvent | null>("agent_ready_snapshot").then(snapshot => {
+      if (!snapshot || snapshot.type !== "ready") return;
+      setAgentReady(true);
+      setAgentStatus("Oh My Pi 已连接");
+      void openAgentSession();
+    });
+  });
+
+  createEffect(() => {
+    const root = projectRoot();
+    if (!root) return;
+    const saved = projectAgentPreferences()[root];
+    const nextId = saved?.llmProfileId && llmProfiles().some(profile => profile.id === saved.llmProfileId)
+      ? saved.llmProfileId
+      : llmProfiles()[0]?.id ?? "";
+    setSelectedLlmId(nextId);
+    setAgentSessionId("");
+    setAgentState(emptyAgentState());
+  });
+
+  createEffect(() => {
+    projectRoot();
+    selectedLlmId();
+    if (agentReady()) void openAgentSession();
+  });
 
   const applyProjectFiles = (project: ProjectResponse) => {
     setProjectFiles(project.files);
@@ -341,6 +421,10 @@ export function App() {
   };
 
   const openProject = async () => {
+    if (aiRunning()) {
+      showToolbarMessage("请先停止 Agent 任务再切换项目", "warning");
+      return;
+    }
     const selected = await open({
       directory: true,
       multiple: false,
@@ -403,12 +487,6 @@ export function App() {
     }
   };
 
-  const readFile = async (path: string) => {
-    const cached = workingFiles().find((file) => file.path === path)?.content;
-    return typeof cached === "string"
-      ? cached
-      : invoke<string>("read_project_file", { root: projectRoot(), path });
-  };
   const addFile = async (
     path: string,
     content = "",
@@ -565,184 +643,156 @@ export function App() {
       showToolbarMessage("AI 未执行：请先打开本地项目", "warning");
       return;
     }
-    if (!aiKey().trim()) {
-      showToolbarMessage("AI 未执行：请在设置中填写 API Key 并点击应用", "warning");
+    if (!selectedLlm()) {
+      showToolbarMessage("AI 未执行：请先创建并选择 LLM 配置", "warning");
       return;
     }
-    const instruction = prompt();
-    const history = [
-      ...aiHistory(),
-      { role: "user" as const, content: instruction },
-    ];
-    const context = [
-      ...aiContext(),
-      { role: "user" as const, content: instruction },
-    ];
-    setAiHistory(history);
-    setAiContext(context);
+    if (!agentSessionId()) {
+      await openAgentSession();
+      showToolbarMessage("Agent 会话正在恢复，请稍后再试", "warning");
+      return;
+    }
+    const text = prompt();
+    const wasRunning = agentState().running;
     setPrompt("");
-    const token = (aiRunToken += 1);
-    const active = () => aiRunToken === token;
-    setAiRunning(true);
+    const runId = wasRunning ? activeRunId() : crypto.randomUUID();
+    if (!runId) {
+      showToolbarMessage("Agent 运行状态不同步，请停止后重试", "error");
+      return;
+    }
+    if (!wasRunning) setActiveRunId(runId);
+    setAgentState(state => {
+      const id = crypto.randomUUID();
+      return {
+        ...state,
+        messages: [...state.messages, {
+        id,
+        role: wasRunning ? "steering" : "user",
+        text,
+      }],
+        timeline: [...state.timeline, { kind: "message", id }],
+      running: true,
+      };
+    });
     try {
-      let step = 0;
-      let done = false;
-      const toolOperations: AiToolOperation[] = [];
-      while (true) {
-        if (done) break;
-        if (!active()) break;
-        const directory = [
-          ...projectFolders().map((path) => `${path}/`),
-          ...projectFiles().map((file) => file.path),
-        ]
-          .sort()
-          .join("\n");
-        const response = await invoke<AiResponse>("ask_ai", {
-          endpoint: aiEndpoint(),
-          model: aiModel(),
-          apiKey: aiKey(),
-          instruction: "",
-          directory,
-          history: context,
-        });
-        if (!active()) break;
-        step += 1;
-        if (!response.actions.every(isSafeAiAction))
-          throw new Error("AI 返回了项目目录外操作");
-        const readPreflight = preflightAiActions(
-          response.actions,
-          toolOperations,
-        );
-        const rejectedReadIndexes = new Set(
-          readPreflight.rejected.map((item) => item.index),
-        );
-        const actions = readPreflight.accepted;
-        const observations: string[] = [];
-        let actionIndex = 0;
-        const parts: AiPart[] = response.segments.flatMap((segment): AiPart[] => {
-          if (segment.kind === "text") return [{ kind: "text", text: segment.text }];
-          const currentIndex = actionIndex++;
-          return rejectedReadIndexes.has(currentIndex)
-            ? []
-            : [{ kind: "tool", action: segment.action, status: "pending" }];
-        });
-        const assistantTurn: Extract<AiTurn, { role: "assistant" }> = {
-          role: "assistant",
-          content: response.message,
-          parts,
-        };
-        const assistantIndex = history.push(assistantTurn) - 1;
-        context.push({ role: "assistant", content: response.message });
-        setAiHistory([...history]);
-        setAiContext([...context]);
-        for (let index = 0; index < actions.length; index += 1) {
-          const action = actions[index];
-          try {
-            if (action.type === "read_file") {
-              const value = await readFile(action.path);
-              observations.push(`${action.path}:\n${value}`);
-              toolOperations.push({ type: "read_file", path: action.path, response: step });
-            } else if (action.type === "patch") {
-              validateAiPatchTarget(action.path, step, toolOperations);
-              toolOperations.push({ type: "patch", path: action.path, response: step });
-              const file = workingFiles().find((item) => item.path === action.path);
-              if (typeof file?.content !== "string")
-                throw new Error(`无法修改 ${action.path}`);
-              const updated = applyAiPatches(file.content, [action]);
-              editTex(action.path, updated);
-              observations.push(`patched ${action.path}`);
-            } else if (action.type === "create_file") {
-              await addFile(action.path, action.content);
-              observations.push(`created ${action.path}`);
-            } else if (action.type === "create_folder") {
-              await addFolder(action.path);
-              observations.push(`created folder ${action.path}`);
-            } else if (action.type === "rename" || action.type === "move") {
-              await renameOrMove(action.from, action.to);
-              observations.push(`moved ${action.from} -> ${action.to}`);
-            } else if (action.type === "trash") {
-              await trashItem(action.path);
-              observations.push(`moved ${action.path} to recycle bin`);
-            }
-            assistantTurn.parts = setToolPartStatus(
-              assistantTurn.parts,
-              index,
-              "completed",
-            );
-          } catch (error) {
-            const result = `action failed (${action.type}): ${String(error)}`;
-            observations.push(result);
-            assistantTurn.parts = setToolPartStatus(
-              assistantTurn.parts,
-              index,
-              "failed",
-            );
-          }
-          history[assistantIndex] = {
-            ...assistantTurn,
-            parts: [...assistantTurn.parts],
-          };
-          setAiHistory([...history]);
-        }
-        const toolResult = buildToolResult(
-          [
-            ...(response.tool_errors?.map((error) => `校验失败：${error}`) ?? []),
-            ...readPreflight.rejected.map((item) => `校验失败：${item.error}`),
-          ],
-          observations,
-        );
-        if (toolResult) {
-          context.push({ role: "user", content: toolResult });
-          setAiContext([...context]);
-        }
-        done = response.done === true;
-      }
+      await sendAgentCommand({
+        type: wasRunning ? "steer" : "prompt",
+        requestId: crypto.randomUUID(),
+        sessionId: agentSessionId(),
+        runId,
+        text,
+      });
     } catch (error) {
-      if (active()) showToolbarMessage(`AI 操作失败：${String(error)}`, "error");
-    } finally {
-      if (active()) setAiRunning(false);
+      setAgentState(state => ({ ...state, running: false }));
+      if (!wasRunning) setActiveRunId("");
+      showToolbarMessage(`AI 操作失败：${String(error)}`, "error");
     }
   };
 
-  const stopAi = () => {
-    aiRunToken += 1;
-    setAiRunning(false);
+  const stopAi = async () => {
+    if (!agentSessionId() || !activeRunId()) return;
+    await sendAgentCommand({
+      type: "abort",
+      requestId: crypto.randomUUID(),
+      sessionId: agentSessionId(),
+      runId: activeRunId(),
+    });
+  };
+
+  const respondToInteraction = async (requestId: string, value: unknown) => {
+    await sendAgentCommand({ type: "interaction_response", requestId, value });
+    setAgentState(state => ({
+      ...state,
+      interactions: state.interactions.filter(item => item.id !== requestId),
+      timeline: state.timeline.filter(item => !(item.kind === "interaction" && item.id === requestId)),
+    }));
   };
 
   const toggleAiRun = () => {
-    if (aiRunning()) stopAi();
+    if (aiRunning()) void stopAi();
     else void runAi();
   };
 
   const openAiSettings = () => {
-    const config = appliedAiConfig();
-    setAiEndpoint(config.endpoint);
-    setAiModel(config.model);
-    setAiKey(config.key);
+    const config = selectedLlm();
+    setProfileName(config?.name ?? "");
+    setAiEndpoint(config?.endpoint ?? "");
+    setAiModel(config?.model ?? "");
+    setAiKey(config?.apiKey ?? "");
     setAiSettingsOpen(true);
+  };
+  const newLlmProfile = () => {
+    setSelectedLlmId("");
+    setAgentSessionId("");
+    setProfileName("");
+    setAiEndpoint("");
+    setAiModel("");
+    setAiKey("");
+    setAiSettingsOpen(true);
+  };
+  const deleteLlmProfile = () => {
+    const profile = selectedLlm();
+    if (!profile || !window.confirm(`确定删除 LLM 配置“${profile.name}”？`)) return;
+    const profiles = llmProfiles().filter(item => item.id !== profile.id);
+    const projects = Object.fromEntries(Object.entries(projectAgentPreferences()).map(([root, preference]) => [
+      root,
+      preference.llmProfileId === profile.id ? { ...preference, llmProfileId: "" } : preference,
+    ]));
+    setLlmProfiles(profiles);
+    setProjectAgentPreferences(projects);
+    setSelectedLlmId("");
+    setAgentSessionId("");
+    persistAgentPreferences(profiles, projects);
+    setAiSettingsOpen(false);
+  };
+  const openAgentConfigDirectory = async () => {
+    const directory = await invoke<string>("agent_config_directory");
+    await openPath(directory);
+  };
+  const reloadAgentConfig = async () => {
+    await sendAgentCommand({ type: "reload_config", requestId: crypto.randomUUID(), agentId: "omp" });
+    showToolbarMessage("Agent 配置已重新加载", "success");
+  };
+  const restartAgent = async () => {
+    setAgentStatus("正在重新启动 Agent...");
+    await invoke("restart_agent_sidecar");
   };
   const toggleAiSettings = () =>
     aiSettingsOpen() ? cancelAiSettings() : openAiSettings();
   const cancelAiSettings = () => {
-    const config = appliedAiConfig();
-    setAiEndpoint(config.endpoint);
-    setAiModel(config.model);
-    setAiKey(config.key);
     setAiSettingsOpen(false);
   };
   const applyAiSettings = () => {
-    setAppliedAiConfig({
-      endpoint: aiEndpoint(),
-      model: aiModel(),
-      key: aiKey(),
-    });
-    saveAiPreferences({
-      endpoint: aiEndpoint(),
-      model: aiModel(),
-      key: aiKey(),
-    });
+    if (!profileName().trim() || !aiEndpoint().trim() || !aiModel().trim()) {
+      showToolbarMessage("LLM 配置名称、Endpoint 和 Model 不能为空", "warning");
+      return;
+    }
+    const existing = selectedLlm();
+    const profile: LlmProfile = {
+      id: existing?.id ?? crypto.randomUUID(),
+      name: profileName().trim(),
+      endpoint: aiEndpoint().trim(),
+      model: aiModel().trim(),
+      apiKey: aiKey(),
+    };
+    if (llmProfiles().some(item => item.id !== profile.id && item.name === profile.name)) {
+      showToolbarMessage("LLM 配置名称必须唯一", "warning");
+      return;
+    }
+    const profiles = existing
+      ? llmProfiles().map(item => item.id === profile.id ? profile : item)
+      : [...llmProfiles(), profile];
+    setLlmProfiles(profiles);
+    setSelectedLlmId(profile.id);
+    setAgentSessionId("");
+    const root = projectRoot();
+    const projects = root
+      ? { ...projectAgentPreferences(), [root]: { agentId: "omp", llmProfileId: profile.id } }
+      : projectAgentPreferences();
+    setProjectAgentPreferences(projects);
+    persistAgentPreferences(profiles, projects);
     setAiSettingsOpen(false);
-    showToolbarMessage("AI 配置已应用", "success");
+    showToolbarMessage("LLM 配置已应用", "success");
   };
   const selectTreeItem = (path: string, kind: "file" | "folder") => {
     setSelectedTreeItem(path);
@@ -795,13 +845,14 @@ export function App() {
         </div>
         <div class="project-name">
           <div>
-            <button class="project-button" onClick={openProject}>
+            <button class="project-button" onClick={openProject} disabled={aiRunning()}>
               {projectName()}
             </button>
             <span> / {entryFile() || "未选择入口"}</span>
           </div>
           <button
             class="project-path"
+            disabled={aiRunning()}
             title={projectRoot() || "点击打开项目"}
             onClick={() =>
               projectRoot()
@@ -1024,40 +1075,96 @@ export function App() {
         <Show when={aiOpen()}>
           <div class="ai-body">
             <div class="ai-interaction">
+              <div class="agent-controls">
+                <label>Agent <select disabled={aiRunning()}><option value="omp">Oh My Pi</option></select></label>
+                <label>LLM
+                  <select
+                    value={selectedLlmId()}
+                    disabled={aiRunning()}
+                    onChange={(event) => {
+                      const llmProfileId = event.currentTarget.value;
+                      setSelectedLlmId(llmProfileId);
+                      setAgentSessionId("");
+                      const root = projectRoot();
+                      if (!root) return;
+                      const projects = { ...projectAgentPreferences(), [root]: { agentId: "omp", llmProfileId } };
+                      setProjectAgentPreferences(projects);
+                      persistAgentPreferences(llmProfiles(), projects);
+                    }}
+                  >
+                    <option value="">选择 LLM 配置</option>
+                    <For each={llmProfiles()}>{profile => <option value={profile.id}>{profile.name} · {profile.model}</option>}</For>
+                  </select>
+                </label>
+                <span>{agentStatus()}</span>
+                <button onClick={newLlmProfile} disabled={aiRunning()}>新建 LLM</button>
+                <button onClick={() => void openAgentConfigDirectory()} disabled={aiRunning()}>配置目录</button>
+                <button onClick={() => void reloadAgentConfig()} disabled={aiRunning() || !agentSessionId()}>重载</button>
+                <Show when={!agentReady()}><button onClick={() => void restartAgent()}>重启</button></Show>
+              </div>
               <div class="ai-interaction-scroll">
                 <Show
-                  when={visibleAiTurns(aiHistory()).length}
+                  when={agentState().timeline.length}
                   fallback={
                     <div class="ai-interaction-empty">
                       在右侧输入任务，操作记录将在这里显示。
                     </div>
                   }
                 >
-                  <For each={visibleAiTurns(aiHistory())}>
-                    {(turn) => (
-                      <div class={`ai-turn ${turn.role}`}>
-                        <span>{turn.role === "user" ? "你" : "AI"}</span>
-                        <div class="ai-turn-body">
-                          {turn.role === "user" ? (
-                            <p>{turn.content}</p>
-                          ) : (
-                            <For each={turn.parts}>
-                              {(part) =>
-                                part.kind === "text" ? (
-                                  <p>{part.text}</p>
-                                ) : (
-                                  <div class={`ai-activity ${part.status}`}>
-                                    <span class="ai-activity-spinner" aria-hidden="true" />
-                                    <p>{part.status === "pending" ? "正在操作" : part.status === "completed" ? actionLabel(part.action) : "操作失败"}</p>
-                                    <strong>{part.status === "pending" || part.status === "failed" ? actionName(part.action) : ""}</strong>
-                                  </div>
-                                )
-                              }
-                            </For>
-                          )}
+                  <For each={agentState().timeline}>
+                    {(item) => {
+                      const message = () => agentState().messages.find(value => value.id === item.id);
+                      const tool = () => agentState().tools.find(value => value.id === item.id);
+                      const interaction = () => agentState().interactions.find(value => value.id === item.id);
+                      const raw = () => agentState().rawEvents.find(value => value.id === item.id);
+                      return item.kind === "message" && message() ? (
+                        <div class={`ai-turn ${message()!.role}`}>
+                          <span>{message()!.role === "user" ? "你" : message()!.role === "steering" ? "引导" : message()!.role === "notice" ? "状态" : "AI"}</span>
+                          <div class="ai-turn-body"><p>{message()!.text}</p></div>
                         </div>
-                      </div>
-                    )}
+                      ) : item.kind === "tool" && tool() ? (
+                        <button
+                          class={`agent-tool-card ${tool()!.status}`}
+                          onClick={() => setAgentState(state => ({ ...state, tools: state.tools.map(value => value.id === item.id ? { ...value, expanded: !value.expanded } : value) }))}
+                        >
+                          <span>{tool()!.status === "running" ? "◌" : tool()!.status === "completed" ? "✓" : "!"}</span>
+                          <strong>{tool()!.name}</strong>
+                          <small>{tool()!.expanded ? "收起" : "展开"}</small>
+                          <Show when={tool()!.expanded}><pre>{JSON.stringify({ input: tool()!.input, update: tool()!.update, result: tool()!.result }, null, 2)}</pre></Show>
+                        </button>
+                      ) : item.kind === "interaction" && interaction() ? (
+                        <div class="agent-interaction-card">
+                          <strong>{interaction()!.title}</strong>
+                          <Show when={interaction()!.message}><p>{interaction()!.message}</p></Show>
+                          <Show
+                            when={interaction()!.interaction === "confirm"}
+                            fallback={interaction()!.interaction === "select" ? (
+                              <div class="agent-interaction-actions">
+                                <For each={interaction()!.options ?? []}>{option => <button onClick={() => void respondToInteraction(item.id, typeof option === "object" && option && "label" in option ? option.label : option)}>{typeof option === "object" && option && "label" in option ? String(option.label) : String(option)}</button>}</For>
+                              </div>
+                            ) : (
+                              <form onSubmit={(event) => { event.preventDefault(); const input = event.currentTarget.elements.namedItem("agent-input") as HTMLInputElement; void respondToInteraction(item.id, input.value); }}>
+                                <input name="agent-input" placeholder={interaction()!.message ?? "输入响应"} />
+                                <button type="submit">提交</button>
+                              </form>
+                            )}
+                          >
+                            <div class="agent-interaction-actions">
+                              <button onClick={() => void respondToInteraction(item.id, true)}>允许</button>
+                              <button onClick={() => void respondToInteraction(item.id, false)}>拒绝</button>
+                            </div>
+                          </Show>
+                        </div>
+                      ) : item.kind === "raw" && raw() ? (
+                        <button
+                          class="agent-tool-card raw"
+                          onClick={() => setAgentState(state => ({ ...state, rawEvents: state.rawEvents.map(value => value.id === item.id ? { ...value, expanded: !value.expanded } : value) }))}
+                        >
+                          <span>·</span><strong>{raw()!.name}</strong><small>{raw()!.expanded ? "收起" : "展开"}</small>
+                          <Show when={raw()!.expanded}><pre>{JSON.stringify(raw()!.payload, null, 2)}</pre></Show>
+                        </button>
+                      ) : null;
+                    }}
                   </For>
                 </Show>
               </div>
@@ -1065,6 +1172,10 @@ export function App() {
             <div class="ai-composer">
               <Show when={aiSettingsOpen()}>
                 <div class="ai-settings-popover">
+                  <label>
+                    <span>Name</span>
+                    <input value={profileName()} onInput={(event) => setProfileName(event.currentTarget.value)} />
+                  </label>
                   <label>
                     <span>Endpoint</span>
                     <input
@@ -1090,7 +1201,10 @@ export function App() {
                       placeholder="保存于本机"
                     />
                   </label>
-                  <button onClick={applyAiSettings}>应用</button>
+                  <div class="llm-settings-actions">
+                    <Show when={selectedLlm()}><button onClick={deleteLlmProfile}>删除</button></Show>
+                    <button onClick={applyAiSettings}>{selectedLlm() ? "保存" : "新增"}</button>
+                  </div>
                 </div>
               </Show>
               <textarea
@@ -1100,13 +1214,14 @@ export function App() {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey))
                     toggleAiRun();
                 }}
-                placeholder="输入项目操作或源码修改要求..."
+                placeholder={aiRunning() ? "输入引导消息..." : "输入项目操作或源码修改要求..."}
               />
               <div class="composer-actions">
                 <button
                   class={`ai-settings-button ${aiSettingsOpen() ? "active" : ""}`}
                   aria-label="AI 设置"
                   onClick={toggleAiSettings}
+                  disabled={aiRunning()}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <circle cx="12" cy="12" r="3" />
@@ -1117,6 +1232,7 @@ export function App() {
                   class="ai-send"
                   aria-label={aiRunning() ? "停止" : "发送"}
                   onClick={toggleAiRun}
+                  disabled={!agentReady() || (!aiRunning() && (!projectRoot() || !selectedLlm()))}
                 >
                   <Show
                     when={aiRunning()}

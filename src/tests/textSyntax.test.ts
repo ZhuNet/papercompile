@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { highlightText, textLanguageForPath } from './textSyntax';
+import { highlightText, textLanguageForPath } from '../textSyntax';
 
 describe('textLanguageForPath', () => {
   it.each([

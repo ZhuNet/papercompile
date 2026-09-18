@@ -1,9 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use tauri::Manager;
+
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
+        .manage(papercompile_core::agent_sidecar::AgentSidecar::default())
+        .setup(|app| {
+            let sidecar = app.state::<papercompile_core::agent_sidecar::AgentSidecar>();
+            sidecar.start(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_project_command,
             compile_project_command,
@@ -15,15 +24,70 @@ fn main() {
             rename_project_item_command,
             delete_project_item_command,
             import_project_files_command,
-            ask_ai_command,
+            send_agent_command,
+            agent_sidecar_status,
+            agent_ready_snapshot,
+            restart_agent_sidecar,
+            agent_config_directory,
             scan_project_command,
             read_project_file_command,
             create_project_file_with_content_command,
             save_compiled_pdf_command,
             watch_project_command
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run PaperCompile");
+        .build(tauri::generate_context!())
+        .expect("failed to build PaperCompile");
+    app.run(|handle, event| {
+        if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+            use tauri::Manager;
+            handle
+                .state::<papercompile_core::agent_sidecar::AgentSidecar>()
+                .shutdown(handle);
+        }
+    });
+}
+
+#[tauri::command(rename = "send_agent_command")]
+fn send_agent_command(
+    command: serde_json::Value,
+    sidecar: tauri::State<'_, papercompile_core::agent_sidecar::AgentSidecar>,
+) -> Result<(), String> {
+    sidecar.send(&command)
+}
+
+#[tauri::command(rename = "agent_sidecar_status")]
+fn agent_sidecar_status(
+    sidecar: tauri::State<'_, papercompile_core::agent_sidecar::AgentSidecar>,
+) -> papercompile_core::agent_sidecar::SidecarStatus {
+    sidecar.status()
+}
+
+#[tauri::command(rename = "agent_ready_snapshot")]
+fn agent_ready_snapshot(
+    sidecar: tauri::State<'_, papercompile_core::agent_sidecar::AgentSidecar>,
+) -> Option<serde_json::Value> {
+    sidecar.ready_snapshot()
+}
+
+#[tauri::command(rename = "restart_agent_sidecar")]
+fn restart_agent_sidecar(
+    app: tauri::AppHandle,
+    sidecar: tauri::State<'_, papercompile_core::agent_sidecar::AgentSidecar>,
+) -> Result<(), String> {
+    sidecar.restart(&app)
+}
+
+#[tauri::command(rename = "agent_config_directory")]
+fn agent_config_directory(app: tauri::AppHandle) -> Result<String, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("agent")
+        .join("agents")
+        .join("omp");
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.to_string_lossy().into_owned())
 }
 
 #[tauri::command(rename = "save_compiled_pdf")]
@@ -158,27 +222,6 @@ fn import_project_files_command(
         .map(std::path::PathBuf::from)
         .collect::<Vec<_>>();
     papercompile_core::project::import_project_files(std::path::Path::new(&root), &folder, &sources)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command(rename = "ask_ai")]
-async fn ask_ai_command(
-    endpoint: String,
-    model: String,
-    api_key: String,
-    instruction: String,
-    directory: String,
-    history: Vec<papercompile_core::ai::ChatMessage>,
-) -> Result<papercompile_core::ai::AiResponse, String> {
-    let request = papercompile_core::ai::ChatRequest::new(
-        &endpoint,
-        &model,
-        &instruction,
-        &directory,
-        &history,
-    );
-    papercompile_core::ai::request_actions(request, &api_key)
-        .await
         .map_err(|error| error.to_string())
 }
 

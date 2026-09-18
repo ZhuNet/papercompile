@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import appSource from './App.tsx?raw';
-import styles from './styles.css?inline';
+import appSource from '../App.tsx?raw';
+import styles from '../styles.css?inline';
 
 describe('top action icons', () => {
   it('uses consistent 24px outline SVGs for save, undo, and compile', () => {

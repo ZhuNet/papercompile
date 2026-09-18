@@ -3,6 +3,11 @@ node_modules/
 
 # Build output
 dist/
+agent/dist/
+src-tauri/binaries/*.exe
+src-tauri/binaries/*.node
+src-tauri/binaries/papercompile-agent-*
+src-tauri/binaries/.papercompile-agent-*.sha256
 
 # Tauri / Rust build artifacts
 src-tauri/target/

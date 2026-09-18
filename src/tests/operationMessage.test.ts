@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { operationErrorReason } from './operationMessage';
+import { operationErrorReason } from '../operationMessage';
 
 describe('operationErrorReason', () => {
   it('translates file errors according to the attempted operation', () => {

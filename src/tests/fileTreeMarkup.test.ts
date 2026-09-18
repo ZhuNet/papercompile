@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import appSource from './App.tsx?raw';
+import appSource from '../App.tsx?raw';
 
 describe('file tree creation markup', () => {
   it('uses inline creation state instead of prompt dialogs', () => {

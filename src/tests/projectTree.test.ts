@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOutlineTree, buildProjectTree, isValidProjectItemName, parentFolder } from './projectTree';
+import { buildOutlineTree, buildProjectTree, isValidProjectItemName, parentFolder } from '../projectTree';
 
 describe('buildProjectTree', () => {
   it('builds folders before files from flat project paths', () => {

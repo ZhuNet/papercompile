@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import appSource from './App.tsx?raw';
-import styles from './styles.css?inline';
+import appSource from '../App.tsx?raw';
+import styles from '../styles.css?inline';
 
 describe('toolbar messages', () => {
   it('renders transient operation feedback in the toolbar instead of the AI dock or corner notice', () => {
