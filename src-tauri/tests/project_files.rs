@@ -22,6 +22,15 @@ fn creates_renames_and_deletes_project_items() {
 }
 
 #[test]
+fn renaming_an_item_to_its_existing_path_is_a_noop() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("main.tex"), "content").unwrap();
+
+    rename_project_item(root.path(), "main.tex", "main.tex").unwrap();
+    assert_eq!(fs::read_to_string(root.path().join("main.tex")).unwrap(), "content");
+}
+
+#[test]
 fn imports_external_files_into_a_project_folder() {
     let root = tempfile::tempdir().unwrap();
     let upload = tempfile::tempdir().unwrap();
@@ -51,8 +60,20 @@ fn rejects_paths_that_escape_or_overwrite_project_items() {
         Err(ProjectFileError::AlreadyExists)
     );
     assert_eq!(
+        create_project_text_file(root.path(), "CON"),
+        Err(ProjectFileError::InvalidName)
+    );
+    assert_eq!(
+        create_project_folder(root.path(), "bad?name"),
+        Err(ProjectFileError::InvalidName)
+    );
+    assert_eq!(
         rename_project_item(root.path(), "main.tex", "../outside.tex"),
         Err(ProjectFileError::UnsafePath)
+    );
+    assert_eq!(
+        rename_project_item(root.path(), "main.tex", "aux.txt"),
+        Err(ProjectFileError::InvalidName)
     );
     assert_eq!(
         delete_project_item(root.path(), ""),

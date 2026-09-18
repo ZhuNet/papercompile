@@ -135,6 +135,8 @@ pub enum ProjectError {
 pub enum ProjectFileError {
     #[error("project path is unsafe")]
     UnsafePath,
+    #[error("project item name is invalid")]
+    InvalidName,
     #[error("project item already exists")]
     AlreadyExists,
     #[error("project item does not exist")]
@@ -158,7 +160,38 @@ fn project_item_path(root: &Path, relative: &str) -> Result<PathBuf, ProjectFile
     {
         return Err(ProjectFileError::UnsafePath);
     }
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(name) if is_valid_project_item_name(name) => {}
+            std::path::Component::Normal(_) | std::path::Component::CurDir => {
+                return Err(ProjectFileError::InvalidName);
+            }
+            _ => {}
+        }
+    }
     Ok(root.join(relative))
+}
+
+fn is_valid_project_item_name(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    if name.is_empty()
+        || name != name.trim()
+        || name == "."
+        || name == ".."
+        || name.ends_with(['.', ' '])
+        || name
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+    {
+        return false;
+    }
+    let stem = name.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    !matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        && !(stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
 pub fn create_project_folder(root: &Path, path: &str) -> Result<(), ProjectFileError> {
@@ -201,6 +234,9 @@ pub fn rename_project_item(root: &Path, from: &str, to: &str) -> Result<(), Proj
     let target = project_item_path(root, to)?;
     if !source.exists() {
         return Err(ProjectFileError::MissingItem);
+    }
+    if source == target {
+        return Ok(());
     }
     if target.exists() {
         return Err(ProjectFileError::AlreadyExists);

@@ -31,6 +31,13 @@ export function parentFolder(path: string): string {
   return separator < 0 ? '' : normalized.slice(0, separator);
 }
 
+export function isValidProjectItemName(name: string): boolean {
+  if (!name || name !== name.trim() || name === '.' || name === '..') return false;
+  if (/[\\/:*?"<>|\u0000-\u001f]/.test(name) || /[. ]$/.test(name)) return false;
+  const stem = name.split('.')[0].toUpperCase();
+  return !/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem);
+}
+
 export function buildProjectTree(files: string[], folders: string[] = []): ProjectTreeNode[] {
   const root: ProjectTreeNode = { name: '', path: '', kind: 'folder', children: [] };
   const ensureFolder = (path: string) => {

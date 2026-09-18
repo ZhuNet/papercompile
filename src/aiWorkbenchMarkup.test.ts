@@ -43,10 +43,10 @@ describe('AI workbench markup', () => {
     expect(styles).not.toContain('.ai-send.running');
   });
 
-  it('replaces the task state bar with a transient centred toast', () => {
+  it('keeps transient operation feedback out of the AI workbench', () => {
     expect(appSource).not.toContain('ai-task-state');
     expect(appSource).not.toContain('setTask(');
-    expect(appSource).toContain('<div class="ai-toast">{aiToast()}</div>');
+    expect(appSource).not.toContain('class="ai-toast"');
   });
 
 });

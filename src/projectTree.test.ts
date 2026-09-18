@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOutlineTree, buildProjectTree, parentFolder } from './projectTree';
+import { buildOutlineTree, buildProjectTree, isValidProjectItemName, parentFolder } from './projectTree';
 
 describe('buildProjectTree', () => {
   it('builds folders before files from flat project paths', () => {
@@ -17,6 +17,20 @@ describe('buildProjectTree', () => {
     expect(parentFolder('sections/method.tex')).toBe('sections');
     expect(parentFolder('sections')).toBe('');
     expect(parentFolder('main.tex')).toBe('');
+  });
+
+  it('accepts a single valid project item name and rejects empty or unsafe names', () => {
+    expect(isValidProjectItemName('chapter.tex')).toBe(true);
+    expect(isValidProjectItemName('')).toBe(false);
+    expect(isValidProjectItemName('   ')).toBe(false);
+    expect(isValidProjectItemName('sections/chapter.tex')).toBe(false);
+    expect(isValidProjectItemName('..')).toBe(false);
+    expect(isValidProjectItemName('draft?.tex')).toBe(false);
+    expect(isValidProjectItemName('CON')).toBe(false);
+    expect(isValidProjectItemName('aux.txt')).toBe(false);
+    expect(isValidProjectItemName('chapter.')).toBe(false);
+    expect(isValidProjectItemName('chapter ')).toBe(false);
+    expect(isValidProjectItemName('bad\u0001name.tex')).toBe(false);
   });
 });
 

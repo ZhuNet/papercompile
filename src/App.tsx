@@ -5,11 +5,13 @@ import {
   createMemo,
   createSignal,
   onCleanup,
+  onMount,
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { projectLocation, projectNotice } from "./projectView";
+import { projectLocation } from "./projectView";
+import { operationErrorReason, type OperationKind } from "./operationMessage";
 import {
   applySourceChanges,
   savableSourceFiles,
@@ -25,6 +27,7 @@ import {
 } from "./aiModel";
 import {
   buildProjectTree,
+  isValidProjectItemName,
   parentFolder,
   type ProjectTreeNode,
 } from "./projectTree";
@@ -106,14 +109,11 @@ export function App() {
   const [view, setView] = createSignal<"preview" | "source">("source");
   const [aiOpen, setAiOpen] = createSignal(true);
   const [prompt, setPrompt] = createSignal("");
-  const [aiToast, setAiToast] = createSignal("");
-  const [aiRunning, setAiRunning] = createSignal(false);
-  const [notice, setNotice] = createSignal<{
-    title: string;
-    detail: string;
-    path: string;
-    tone: "success" | "error";
+  const [toolbarMessage, setToolbarMessage] = createSignal<{
+    text: string;
+    tone: "success" | "warning" | "error";
   }>();
+  const [aiRunning, setAiRunning] = createSignal(false);
   const [projectFiles, setProjectFiles] = createSignal<ProjectFile[]>([]);
   const [projectFolders, setProjectFolders] = createSignal<string[]>([]);
   const [selectedFile, setSelectedFile] = createSignal("");
@@ -133,6 +133,8 @@ export function App() {
   const [compiling, setCompiling] = createSignal(false);
   const [renamingPath, setRenamingPath] = createSignal("");
   const [renameValue, setRenameValue] = createSignal("");
+  const [creationKind, setCreationKind] = createSignal<"file" | "folder">();
+  const [creationFolder, setCreationFolder] = createSignal("");
   const [lastProjectSignature, setLastProjectSignature] = createSignal("");
   const [projectName, setProjectName] = createSignal("尚未打开项目");
   const [sourceDraft, setSourceDraft] = createSignal("");
@@ -172,14 +174,20 @@ export function App() {
     ),
   );
 
-  let aiToastTimer: ReturnType<typeof setTimeout> | undefined;
+  let toolbarMessageTimer: ReturnType<typeof setTimeout> | undefined;
   let aiRunToken = 0;
-  const flashAiToast = (message: string) => {
-    setAiToast(message);
-    clearTimeout(aiToastTimer);
-    aiToastTimer = setTimeout(() => setAiToast(""), 2600);
+  const showToolbarMessage = (
+    text: string,
+    tone: "success" | "warning" | "error",
+  ) => {
+    setToolbarMessage({ text, tone });
+    clearTimeout(toolbarMessageTimer);
+    toolbarMessageTimer = setTimeout(
+      () => setToolbarMessage(),
+      tone === "success" ? 3000 : 6000,
+    );
   };
-  onCleanup(() => clearTimeout(aiToastTimer));
+  onCleanup(() => clearTimeout(toolbarMessageTimer));
 
   const applyProjectFiles = (project: ProjectResponse) => {
     setProjectFiles(project.files);
@@ -216,13 +224,19 @@ export function App() {
     setWorkingFiles(state.files);
     setUndoStack(state.history);
     setEntryFile(project.entry);
-    const nextSelected = state.files.some((file) => file.path === selectedFile())
-      ? selectedFile()
+    const currentTreeItem = selectedTreeItem();
+    const currentFile = selectedFile();
+    const nextTreeItem = state.files.some((file) => file.path === currentTreeItem)
+      || project.folders.includes(currentTreeItem)
+      ? currentTreeItem
       : project.entry;
-    setSelectedFile(nextSelected);
-    setSelectedTreeItem(nextSelected);
+    const nextSelectedFile = state.files.some((file) => file.path === currentFile)
+      ? currentFile
+      : project.entry;
+    setSelectedFile(nextSelectedFile);
+    setSelectedTreeItem(nextTreeItem);
     setSourceDraft(
-      state.files.find((file) => file.path === nextSelected)?.content ?? "",
+      state.files.find((file) => file.path === nextSelectedFile)?.content ?? "",
     );
   };
 
@@ -317,12 +331,12 @@ export function App() {
           content: file.content,
         });
       } catch (error) {
-        flashAiToast(`保存失败 · ${String(error)}`);
+        showToolbarMessage(`无法保存 ${file.path}：${operationErrorReason("save", error)}`, "error");
         return false;
       }
     }
     await refreshProjectFiles();
-    flashAiToast("项目源码已保存");
+    showToolbarMessage("项目源码已保存", "success");
     return true;
   };
 
@@ -335,10 +349,9 @@ export function App() {
     if (!selected || Array.isArray(selected)) return;
     try {
       await loadProject(selected);
-      setNotice(projectNotice(selected, true));
-      setTimeout(() => setNotice(), 4500);
+      showToolbarMessage(`已打开项目：${projectLocation(selected).name}`, "success");
     } catch (error) {
-      setNotice({ ...projectNotice(selected, false), path: String(error) });
+      showToolbarMessage(`无法打开项目：${operationErrorReason("open-project", error)}`, "error");
     }
   };
 
@@ -396,7 +409,10 @@ export function App() {
       ? cached
       : invoke<string>("read_project_file", { root: projectRoot(), path });
   };
-  const addFile = async (path: string, content = "") => {
+  const addFile = async (
+    path: string,
+    content = "",
+  ) => {
     await invoke("create_project_file_with_content", {
       root: projectRoot(),
       path,
@@ -404,7 +420,9 @@ export function App() {
     });
     await refreshProjectFiles();
   };
-  const addFolder = async (path: string) => {
+  const addFolder = async (
+    path: string,
+  ) => {
     await invoke("create_project_folder", { root: projectRoot(), path });
     await refreshProjectFiles();
   };
@@ -418,14 +436,16 @@ export function App() {
   };
   const userFileOperation = async (
     operation: () => Promise<void>,
-    message: string,
+    operationKind: OperationKind,
+    successMessage: string,
+    failureMessage: string,
   ) => {
     if (!projectRoot()) return;
     try {
       await operation();
-      flashAiToast(message);
+      showToolbarMessage(successMessage, "success");
     } catch (error) {
-      flashAiToast(`文件操作失败 · ${String(error)}`);
+      showToolbarMessage(`${failureMessage}：${operationErrorReason(operationKind, error)}`, "error");
     }
   };
   const targetFolder = () => {
@@ -433,21 +453,51 @@ export function App() {
     if (projectFolders().includes(selected)) return selected;
     return parentFolder(selected);
   };
-  const createFile = () => {
-    const name = window.prompt("新文件名（可包含相对路径）");
-    if (!name?.trim()) return;
-    const path = targetFolder()
-      ? `${targetFolder()}/${name.trim()}`
-      : name.trim();
-    void userFileOperation(() => addFile(path), `已新建 ${path}`);
+  const beginCreation = (kind: "file" | "folder") => {
+    if (creationKind()) return;
+    setRenamingPath("");
+    setCreationFolder(targetFolder());
+    setCreationKind(kind);
   };
-  const createFolder = () => {
-    const name = window.prompt("新文件夹名");
-    if (!name?.trim()) return;
-    const path = targetFolder()
-      ? `${targetFolder()}/${name.trim()}`
-      : name.trim();
-    void userFileOperation(() => addFolder(path), `已新建 ${path}`);
+  const cancelCreation = () => {
+    setCreationKind();
+    setCreationFolder("");
+  };
+  const commitCreation = (name: string) => {
+    const kind = creationKind();
+    const folder = creationFolder();
+    if (!kind) return;
+    cancelCreation();
+    if (!isValidProjectItemName(name)) {
+      showToolbarMessage(
+        kind === "file"
+          ? "无法新建文件：名称为空、属于系统保留名或包含非法字符"
+          : "无法新建文件夹：名称为空、属于系统保留名或包含非法字符",
+        "warning",
+      );
+      return;
+    }
+    const path = folder
+      ? `${folder}/${name}`
+      : name;
+    selectTreeItem(path, kind === "file" ? "file" : "folder");
+    void userFileOperation(
+      () => kind === "file"
+        ? addFile(path)
+        : addFolder(path),
+      kind === "file" ? "create-file" : "create-folder",
+      kind === "file" ? `已新建文件：${path}` : `已新建文件夹：${path}`,
+      kind === "file" ? `无法新建文件 ${path}` : `无法新建文件夹 ${path}`,
+    );
+  };
+  const handleCreationKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelCreation();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      commitCreation((event.currentTarget as HTMLInputElement).value);
+    }
   };
   const renameItem = () => {
     const from = selectedTreeItem();
@@ -455,23 +505,40 @@ export function App() {
     setRenamingPath(from);
     setRenameValue(from.slice(from.lastIndexOf("/") + 1));
   };
+  const cancelRename = () => setRenamingPath("");
   const commitRename = () => {
     const from = renamingPath();
-    const name = renameValue().trim();
-    if (!from || !name) {
+    const name = renameValue();
+    if (!from) return;
+    if (!isValidProjectItemName(name)) {
       setRenamingPath("");
+      showToolbarMessage(
+        "无法重命名：名称为空、属于系统保留名或包含非法字符",
+        "warning",
+      );
       return;
     }
     const folder = parentFolder(from);
     const to = folder ? `${folder}/${name}` : name;
+    selectTreeItem(to, projectFolders().includes(from) ? "folder" : "file");
     setRenamingPath("");
-    void userFileOperation(() => renameOrMove(from, to), `已重命名为 ${to}`);
+    void userFileOperation(
+      () => renameOrMove(from, to),
+      "rename",
+      `已将 ${from} 重命名为 ${to}`,
+      `无法重命名 ${from}`,
+    );
   };
   const deleteItem = () => {
     const path = selectedTreeItem();
     if (!path) return;
     if (!window.confirm(`确定删除 ${path}？文件夹内内容也会被删除。`)) return;
-    void userFileOperation(() => trashItem(path), `已移入回收站 ${path}`);
+    void userFileOperation(
+      () => trashItem(path),
+      "delete",
+      `已将 ${path} 移入回收站`,
+      `无法删除 ${path}`,
+    );
   };
   const uploadFiles = async () => {
     const selected = await open({
@@ -481,24 +548,25 @@ export function App() {
     });
     if (!selected) return;
     const sources = Array.isArray(selected) ? selected : [selected];
+    const folder = targetFolder();
     await userFileOperation(async () => {
       await invoke("import_project_files", {
         root: projectRoot(),
-        folder: targetFolder(),
+        folder,
         sources,
       });
       await refreshProjectFiles();
-    }, `已上传 ${sources.length} 个文件`);
+    }, "upload", `已上传 ${sources.length} 个文件到 ${folder || "项目根目录"}`, "无法上传文件");
   };
 
   const runAi = async () => {
     if (!prompt().trim()) return;
     if (!projectRoot()) {
-      flashAiToast("AI 未执行 · 请先打开本地项目");
+      showToolbarMessage("AI 未执行：请先打开本地项目", "warning");
       return;
     }
     if (!aiKey().trim()) {
-      flashAiToast("AI 未执行 · 请在设置中填写 API Key 并点击应用");
+      showToolbarMessage("AI 未执行：请在设置中填写 API Key 并点击应用", "warning");
       return;
     }
     const instruction = prompt();
@@ -630,7 +698,7 @@ export function App() {
         done = response.done === true;
       }
     } catch (error) {
-      if (active()) flashAiToast(`AI 操作失败 · ${String(error)}`);
+      if (active()) showToolbarMessage(`AI 操作失败：${String(error)}`, "error");
     } finally {
       if (active()) setAiRunning(false);
     }
@@ -674,7 +742,24 @@ export function App() {
       key: aiKey(),
     });
     setAiSettingsOpen(false);
-    flashAiToast("AI 配置已应用");
+    showToolbarMessage("AI 配置已应用", "success");
+  };
+  const selectTreeItem = (path: string, kind: "file" | "folder") => {
+    setSelectedTreeItem(path);
+    if (kind === "file") {
+      setSelectedFile(path);
+      setSourceDraft(
+        workingFiles().find((file) => file.path === path)?.content ?? "",
+      );
+      setView("source");
+    }
+  };
+  const selectPendingTreeItem = (item: HTMLElement | null) => {
+    if (!item) return;
+    selectTreeItem(
+      item.dataset.treePath ?? "",
+      item.dataset.treeKind === "folder" ? "folder" : "file",
+    );
   };
 
   return (
@@ -682,8 +767,19 @@ export function App() {
       class="app-shell"
       onPointerDown={(event) => {
         const target = event.target as Element;
-        if (renamingPath() && !target.closest(".tree-rename"))
-          setRenamingPath("");
+        const pendingTreeSelection = target.closest(".tree-item") as HTMLElement | null;
+        if (
+          creationKind() &&
+          !target.closest(".tree-create") &&
+          !target.closest(".file-operation-row")
+        ) {
+          commitCreation((document.activeElement as HTMLInputElement | null)?.value ?? "");
+          selectPendingTreeItem(pendingTreeSelection);
+        }
+        if (renamingPath() && !target.closest(".tree-rename")) {
+          commitRename();
+          selectPendingTreeItem(pendingTreeSelection);
+        }
         if (
           aiSettingsOpen() &&
           !target.closest(".ai-settings-popover") &&
@@ -764,6 +860,13 @@ export function App() {
         >
           正文
         </button>
+        <Show when={toolbarMessage()}>
+          {(current) => (
+            <div class={`toolbar-message ${current().tone}`}>
+              {current().text}
+            </div>
+          )}
+        </Show>
         <span class="toolbar-spacer" />
         <span class={`save-state ${dirty() ? "dirty" : ""}`}>
           {dirty() ? "● 有未保存源码" : "✓ 源码已保存"}
@@ -778,7 +881,7 @@ export function App() {
             <strong>项目文件</strong>
           </div>
           <div class="file-actions file-operation-row">
-            <button title="新建文件" aria-label="新建文件" onClick={createFile}>
+            <button title="新建文件" aria-label="新建文件" onClick={() => beginCreation("file")}>
               <svg viewBox="0 0 24 24">
                 <path d="M6 3h8l4 4v14H6zM14 3v5h5M12 12v6M9 15h6" />
               </svg>
@@ -786,7 +889,7 @@ export function App() {
             <button
               title="新建文件夹"
               aria-label="新建文件夹"
-              onClick={createFolder}
+              onClick={() => beginCreation("folder")}
             >
               <svg viewBox="0 0 24 24">
                 <path d="M3 6h7l2 2h9v12H3zM12 11v6M9 14h6" />
@@ -812,27 +915,29 @@ export function App() {
               </svg>
             </button>
           </div>
-          <div class="file-tree">
-            <For each={fileTree()}>
+           <div class="file-tree">
+             <Show when={creationKind() && !creationFolder()}>
+               <InlineCreationInput
+                 kind={creationKind()!}
+                 onKeyDown={handleCreationKeyDown}
+                 onCommit={commitCreation}
+               />
+             </Show>
+             <For each={fileTree()}>
               {(node) => (
                 <FileTreeNode
                   node={node}
                   selected={selectedTreeItem()}
                   renamingPath={renamingPath()}
                   renameValue={renameValue()}
-                  onRenameValue={setRenameValue}
-                  onCommitRename={commitRename}
-                  onSelect={(item) => {
-                    setSelectedTreeItem(item.path);
-                    if (item.kind === "file") {
-                      setSelectedFile(item.path);
-                      setSourceDraft(
-                        workingFiles().find((file) => file.path === item.path)
-                          ?.content ?? "",
-                      );
-                      setView("source");
-                    }
-                  }}
+                    onRenameValue={setRenameValue}
+                    onCommitRename={commitRename}
+                    onCancelRename={cancelRename}
+                   creationKind={creationKind()}
+                   creationFolder={creationFolder()}
+                   onCreationKeyDown={handleCreationKeyDown}
+                   onCreationCommit={commitCreation}
+                      onSelect={(item) => selectTreeItem(item.path, item.kind)}
                 />
               )}
             </For>
@@ -908,23 +1013,6 @@ export function App() {
           </div>
         </aside>
       </section>
-      <Show when={notice()}>
-        {(current) => (
-          <div class={`project-notice ${current().tone}`}>
-            <div class="notice-icon">
-              {current().tone === "success" ? "✓" : "!"}
-            </div>
-            <div class="notice-copy">
-              <strong>{current().title}</strong>
-              <span>{current().detail}</span>
-              <small title={current().path}>{current().path}</small>
-            </div>
-            <button class="notice-close" onClick={() => setNotice()}>
-              ×
-            </button>
-          </div>
-        )}
-      </Show>
       <section class={`ai-dock ${aiOpen() ? "" : "collapsed"}`}>
         <button
           class="ai-dock-toggle"
@@ -973,9 +1061,6 @@ export function App() {
                   </For>
                 </Show>
               </div>
-              <Show when={aiToast()}>
-                <div class="ai-toast">{aiToast()}</div>
-              </Show>
             </div>
             <div class="ai-composer">
               <Show when={aiSettingsOpen()}>
@@ -1060,25 +1145,34 @@ function FileTreeNode(props: {
   selected: string;
   renamingPath: string;
   renameValue: string;
+  creationKind?: "file" | "folder";
+  creationFolder: string;
   onRenameValue: (value: string) => void;
   onCommitRename: () => void;
+  onCancelRename: () => void;
+  onCreationKeyDown: (event: KeyboardEvent) => void;
+  onCreationCommit: (name: string) => void;
   onSelect: (node: ProjectTreeNode) => void;
 }) {
   const [expanded, setExpanded] = createSignal(true);
+  const showingChildren = () =>
+    expanded() || Boolean(props.creationKind && props.creationFolder === props.node.path);
   return (
     <div class="tree-branch">
       <Show
         when={props.renamingPath === props.node.path}
         fallback={
-          <button
-            class={`tree-item ${props.node.kind} ${props.selected === props.node.path ? "current" : ""}`}
+           <button
+             data-tree-path={props.node.path}
+             data-tree-kind={props.node.kind}
+             class={`tree-item ${props.node.kind} ${props.selected === props.node.path ? "current" : ""}`}
             onClick={() => {
               props.onSelect(props.node);
               if (props.node.kind === "folder") setExpanded(!expanded());
             }}
           >
             <span>
-              {props.node.kind === "folder" ? (expanded() ? "▾" : "▸") : "·"}
+              {props.node.kind === "folder" ? (showingChildren() ? "▾" : "▸") : "·"}
             </span>
             {props.node.name}
           </button>
@@ -1092,12 +1186,19 @@ function FileTreeNode(props: {
           onBlur={props.onCommitRename}
           onKeyDown={(event) => {
             if (event.key === "Enter") props.onCommitRename();
-            if (event.key === "Escape") props.onCommitRename();
+            if (event.key === "Escape") props.onCancelRename();
           }}
         />
       </Show>
-      <Show when={props.node.kind === "folder" && expanded()}>
+      <Show when={props.node.kind === "folder" && showingChildren()}>
         <div class="tree-children">
+          <Show when={props.creationKind && props.creationFolder === props.node.path}>
+            <InlineCreationInput
+              kind={props.creationKind!}
+              onKeyDown={props.onCreationKeyDown}
+              onCommit={props.onCreationCommit}
+            />
+          </Show>
           <For each={props.node.children}>
             {(child) => (
               <FileTreeNode
@@ -1105,14 +1206,41 @@ function FileTreeNode(props: {
                 selected={props.selected}
                 renamingPath={props.renamingPath}
                 renameValue={props.renameValue}
+                creationKind={props.creationKind}
+                creationFolder={props.creationFolder}
                 onRenameValue={props.onRenameValue}
                 onCommitRename={props.onCommitRename}
+                onCancelRename={props.onCancelRename}
+                onCreationKeyDown={props.onCreationKeyDown}
+                onCreationCommit={props.onCreationCommit}
                 onSelect={props.onSelect}
               />
             )}
           </For>
         </div>
       </Show>
+    </div>
+  );
+}
+
+function InlineCreationInput(props: {
+  kind: "file" | "folder";
+  onKeyDown: (event: KeyboardEvent) => void;
+  onCommit: (name: string) => void;
+}) {
+  let input: HTMLInputElement | undefined;
+  onMount(() => input?.focus());
+  return (
+    <div class="tree-create-row">
+      <span>·</span>
+      <input
+        ref={input}
+        class="tree-create"
+        autofocus
+        placeholder={props.kind === "file" ? "新建文件" : "新建文件夹"}
+        onBlur={(event) => props.onCommit(event.currentTarget.value)}
+        onKeyDown={props.onKeyDown}
+      />
     </div>
   );
 }
