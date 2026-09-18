@@ -718,7 +718,11 @@ export function App() {
         </div>
         <div class="top-actions">
           <button title="保存" aria-label="保存" onClick={saveProject}>
-            <span class="action-icon save-icon" />
+            <svg class="action-svg" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+              <rect x="7" y="4" width="9" height="5" rx="1" />
+              <rect x="7" y="13" width="10" height="7" rx="1" />
+            </svg>
           </button>
           <button
             title="撤销"
@@ -737,9 +741,13 @@ export function App() {
             onClick={compileProject}
             disabled={compiling()}
           >
-            <span
-              class={`action-icon compile-icon ${compiling() ? "busy" : ""}`}
-            />
+            <svg
+              class={`action-svg compile-icon ${compiling() ? "busy" : ""}`}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="M5 3v18l16-9z" />
+            </svg>
           </button>
         </div>
       </header>
