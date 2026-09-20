@@ -26,7 +26,7 @@ describe("SidecarService", () => {
       requestId: "2",
       projectRoot: "C:/paper",
       agentId: "omp",
-      profile: { id: "p", name: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
+      profile: { id: "p", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     });
     await service.handle({ type: "prompt", requestId: "3", sessionId: "omp:project", runId: "r", text: "work" });
     await service.handle({ type: "steer", requestId: "4", sessionId: "omp:project", runId: "r", text: "adjust" });
@@ -55,7 +55,7 @@ describe("SidecarService", () => {
     await service.handle({ type: "initialize", requestId: "1", configRoot: "C:/data" });
     await service.handle({
       type: "open_session", requestId: "2", projectRoot: "C:/paper", agentId: "omp",
-      profile: { id: "p", name: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
+      profile: { id: "p", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     });
 
     await service.handle({ type: "prompt", requestId: "3", sessionId: "omp:project", runId: "r", text: "work" });
@@ -82,11 +82,35 @@ describe("SidecarService", () => {
     await service.handle({ type: "initialize", requestId: "1", configRoot: "C:/data" });
     await service.handle({
       type: "open_session", requestId: "2", projectRoot: "C:/paper", agentId: "omp",
-      profile: { id: "p", name: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
+      profile: { id: "p", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     });
     await service.handle({ type: "prompt", requestId: "3", sessionId: "omp:project", runId: "r", text: "work" });
     await Promise.resolve();
 
     expect(events).toContainEqual({ type: "run_finished", sessionId: "omp:project", runId: "r" });
+  });
+
+  it("reports an aborted run even when OMP abort fails", async () => {
+    const events: unknown[] = [];
+    const adapter = {
+      id: "omp", name: "Oh My Pi",
+      openSession: async () => ({ sessionId: "omp:project", history: [] }),
+      prompt: async () => undefined,
+      steer: async () => undefined,
+      abort: async () => { throw new Error("abort failed"); },
+      reload: async () => undefined,
+      dispose: async () => undefined,
+    };
+    const service = new SidecarService(adapter, event => events.push(event), async () => undefined);
+    await service.handle({ type: "initialize", requestId: "1", configRoot: "C:/data" });
+    await service.handle({
+      type: "open_session", requestId: "2", projectRoot: "C:/paper", agentId: "omp",
+      profile: { id: "p", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
+    });
+
+    await expect(service.handle({ type: "abort", requestId: "3", sessionId: "omp:project", runId: "r" }))
+      .rejects.toThrow("abort failed");
+
+    expect(events).toContainEqual({ type: "run_aborted", sessionId: "omp:project", runId: "r" });
   });
 });

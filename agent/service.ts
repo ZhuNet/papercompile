@@ -76,8 +76,11 @@ export class SidecarService {
       case "abort":
         this.requireSession(command.sessionId);
         this.cancelInteractions();
-        await this.adapter.abort(command.runId);
-        this.emit({ type: "run_aborted", sessionId: this.sessionId, runId: command.runId });
+        try {
+          await this.adapter.abort(command.runId);
+        } finally {
+          this.emit({ type: "run_aborted", sessionId: this.sessionId, runId: command.runId });
+        }
         return;
       case "reload_config":
         if (command.agentId !== this.adapter.id) throw new Error(`unknown agent ${command.agentId}`);

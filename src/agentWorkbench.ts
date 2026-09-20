@@ -1,6 +1,6 @@
 export type LlmProfile = {
   id: string;
-  name: string;
+  provider: string;
   endpoint: string;
   model: string;
   apiKey: string;
@@ -9,6 +9,7 @@ export type LlmProfile = {
 export type AgentPreferences = {
   profiles: LlmProfile[];
   projects: Record<string, { agentId: string; llmProfileId: string }>;
+  selectedLlmId: string;
 };
 
 export type AgentEvent = Record<string, unknown> & { type: string };
@@ -19,9 +20,8 @@ export type AgentTool = {
   update?: unknown;
   result?: unknown;
   status: 'running' | 'completed' | 'failed';
-  expanded: boolean;
 };
-export type AgentMessage = { id: string; role: 'user' | 'assistant' | 'steering' | 'notice'; text: string };
+export type AgentMessage = { id: string; role: 'user' | 'assistant' | 'steering'; text: string };
 export type AgentInteraction = {
   id: string;
   interaction: 'confirm' | 'select' | 'input';
@@ -41,17 +41,37 @@ export type AgentWorkbenchState = {
 };
 
 const preferencesKey = 'papercompile.agent.preferences';
-const emptyPreferences = (): AgentPreferences => ({ profiles: [], projects: {} });
+const emptyPreferences = (): AgentPreferences => ({ profiles: [], projects: {}, selectedLlmId: '' });
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 
 export function loadAgentPreferences(storage: StorageLike = localStorage): AgentPreferences {
   try {
-    const value = JSON.parse(storage.getItem(preferencesKey) ?? 'null') as AgentPreferences | null;
-    return value && Array.isArray(value.profiles) && value.projects ? value : emptyPreferences();
+    const value = JSON.parse(storage.getItem(preferencesKey) ?? 'null') as Partial<AgentPreferences> | null;
+    if (!value || !Array.isArray(value.profiles) || !value.projects) return emptyPreferences();
+    const profiles = value.profiles.flatMap(profile => {
+      const legacy = profile as LlmProfile & { name?: string };
+      const provider = legacy.provider ?? legacy.name;
+      return provider ? [{ ...profile, provider }] : [];
+    });
+    const selectedLlmId = profiles.some(profile => profile.id === value.selectedLlmId)
+      ? value.selectedLlmId!
+      : profiles[0]?.id ?? '';
+    return { profiles, projects: value.projects, selectedLlmId };
   } catch {
     return emptyPreferences();
   }
+}
+
+export function hasDuplicateLlmModel(
+  profiles: LlmProfile[],
+  candidate: Pick<LlmProfile, 'id' | 'provider' | 'model'>,
+): boolean {
+  return profiles.some(profile =>
+    profile.id !== candidate.id
+    && profile.provider === candidate.provider
+    && profile.model === candidate.model,
+  );
 }
 
 export function saveAgentPreferences(
@@ -79,12 +99,7 @@ export function applyAgentEvent(state: AgentWorkbenchState, event: AgentEvent): 
     return { ...state, messages };
   }
   if (event.type === 'notice') {
-    const id = crypto.randomUUID();
-    return {
-      ...state,
-      messages: [...state.messages, { id, role: 'notice', text: String(event.message ?? '') }],
-      timeline: [...state.timeline, { kind: 'message', id }],
-    };
+    return state;
   }
   if (event.type === 'tool_started') {
     return {
@@ -94,7 +109,6 @@ export function applyAgentEvent(state: AgentWorkbenchState, event: AgentEvent): 
         name: String(event.name),
         input: event.input,
         status: 'running',
-        expanded: false,
       }],
       timeline: [...state.timeline, { kind: 'tool', id: String(event.toolCallId) }],
     };
@@ -127,12 +141,7 @@ export function applyAgentEvent(state: AgentWorkbenchState, event: AgentEvent): 
     };
   }
   if (event.type === 'raw') {
-    const id = `raw-${state.rawEvents.length}`;
-    return {
-      ...state,
-      rawEvents: [...state.rawEvents, { id, name: String(event.name ?? 'unknown'), payload: event.payload, expanded: false }],
-      timeline: [...state.timeline, { kind: 'raw', id }],
-    };
+    return state;
   }
   return state;
 }

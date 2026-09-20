@@ -1,6 +1,6 @@
 export type LlmProfile = {
   id: string;
-  name: string;
+  provider: string;
   endpoint: string;
   model: string;
   apiKey: string;

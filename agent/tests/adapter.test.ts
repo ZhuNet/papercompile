@@ -32,7 +32,7 @@ describe("AgentAdapter", () => {
       projectRoot: "C:/paper",
       agentDir: "C:/data/agent",
       sessionDir: "C:/data/sessions/project/omp",
-      profile: { id: "llm", name: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
+      profile: { id: "llm", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     });
     adapter.startRun("run-1");
     runtime.emit({ type: "future_event", value: 1 });
@@ -53,7 +53,7 @@ describe("AgentAdapter", () => {
       projectRoot: "C:/paper",
       agentDir: "C:/data/agent",
       sessionDir: "C:/data/sessions/project/omp",
-      profile: { id: "llm", name: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
+      profile: { id: "llm", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     });
 
     await adapter.prompt("run-1", "work");

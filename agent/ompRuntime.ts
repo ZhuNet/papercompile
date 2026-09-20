@@ -71,7 +71,7 @@ export async function createOmpRuntime(
     authHeader: Boolean(options.profile.apiKey),
     models: [{
       id: options.profile.model,
-      name: options.profile.name,
+      name: options.profile.model,
       reasoning: false,
       input: ["text", "image"],
       supportsTools: true,

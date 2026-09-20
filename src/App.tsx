@@ -4,13 +4,13 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
   onMount,
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { projectLocation } from "./projectView";
 import { operationErrorReason, type OperationKind } from "./operationMessage";
 import {
@@ -32,6 +32,7 @@ import {
 } from "./compiledPreview";
 import { PdfPreview, TextDocumentPreview } from "./PdfPreview";
 import { SourceScrollPositions, type SourceScrollPosition } from "./sourceView";
+import { aiPanelHeightKey, clampAiPanelHeight, isNearScrollBottom } from "./aiPanel";
 import { highlightText, textLanguageForPath } from "./textSyntax";
 import {
   compiledPdfDocument,
@@ -40,9 +41,11 @@ import {
 } from "./pdfViewer";
 import {
   applyAgentEvent,
+  hasDuplicateLlmModel,
   loadAgentPreferences,
   saveAgentPreferences,
   type AgentEvent,
+  type AgentTool,
   type AgentWorkbenchState,
   type LlmProfile,
 } from "./agentWorkbench";
@@ -116,7 +119,7 @@ export function App() {
   const initialAgentPreferences = loadAgentPreferences();
   const [llmProfiles, setLlmProfiles] = createSignal<LlmProfile[]>(initialAgentPreferences.profiles);
   const [projectAgentPreferences, setProjectAgentPreferences] = createSignal(initialAgentPreferences.projects);
-  const [selectedLlmId, setSelectedLlmId] = createSignal("");
+  const [selectedLlmId, setSelectedLlmId] = createSignal(initialAgentPreferences.selectedLlmId);
   const [agentSessionId, setAgentSessionId] = createSignal("");
   const [activeRunId, setActiveRunId] = createSignal("");
   const [agentReady, setAgentReady] = createSignal(false);
@@ -125,10 +128,17 @@ export function App() {
   const [agentState, setAgentState] = createSignal<AgentWorkbenchState>(emptyAgentState());
   const aiRunning = createMemo(() => agentState().running);
   const [aiSettingsOpen, setAiSettingsOpen] = createSignal(false);
-  const [profileName, setProfileName] = createSignal("");
+  const savedAiPanelHeight = Number(localStorage.getItem(aiPanelHeightKey));
+  const [aiPanelHeight, setAiPanelHeight] = createSignal(
+    clampAiPanelHeight(Number.isFinite(savedAiPanelHeight) && savedAiPanelHeight > 0 ? savedAiPanelHeight : 190, window.innerHeight),
+  );
+  const [creatingLlmProfile, setCreatingLlmProfile] = createSignal(false);
+  const [profileProvider, setProfileProvider] = createSignal("");
   const [aiEndpoint, setAiEndpoint] = createSignal("");
   const [aiModel, setAiModel] = createSignal("");
   const [aiKey, setAiKey] = createSignal("");
+  let interactionScroll: HTMLDivElement | undefined;
+  let followInteractionBottom = true;
   const dirty = createMemo(() =>
     workingFiles().some(
       (file) =>
@@ -162,7 +172,8 @@ export function App() {
   const persistAgentPreferences = (
     profiles = llmProfiles(),
     projects = projectAgentPreferences(),
-  ) => saveAgentPreferences({ profiles, projects });
+    selected = selectedLlmId(),
+  ) => saveAgentPreferences({ profiles, projects, selectedLlmId: selected });
   const selectedLlm = createMemo(() =>
     llmProfiles().find((profile) => profile.id === selectedLlmId()),
   );
@@ -191,7 +202,7 @@ export function App() {
     unlisteners.push(listen<AgentEvent>("agent-event", async ({ payload }) => {
       if (payload.type === "ready") {
         setAgentReady(true);
-        setAgentStatus("Oh My Pi 已连接");
+        setAgentStatus("");
         await openAgentSession();
         return;
       }
@@ -210,17 +221,14 @@ export function App() {
           if (!text || (role !== "user" && role !== "assistant")) return [];
           return [{ id: `history-${index}`, role: role as "user" | "assistant", text }];
         });
-        const rawEvents = history.length ? [{ id: "raw-history", name: "OMP 会话原始历史", payload: history, expanded: false }] : [];
-        setAgentState({
-          ...emptyAgentState(),
-          messages,
-          rawEvents,
-          timeline: [
-            ...messages.map(message => ({ kind: "message" as const, id: message.id })),
-            ...rawEvents.map(event => ({ kind: "raw" as const, id: event.id })),
-          ],
-        });
-        setAgentStatus("Oh My Pi 会话已恢复");
+        if (agentState().timeline.length === 0) {
+          setAgentState({
+            ...emptyAgentState(),
+            messages,
+            timeline: messages.map(message => ({ kind: "message" as const, id: message.id })),
+          });
+        }
+        setAgentStatus("");
         return;
       }
       if (payload.type === "interaction_requested") {
@@ -246,28 +254,59 @@ export function App() {
     void invoke<AgentEvent | null>("agent_ready_snapshot").then(snapshot => {
       if (!snapshot || snapshot.type !== "ready") return;
       setAgentReady(true);
-      setAgentStatus("Oh My Pi 已连接");
+      setAgentStatus("");
       void openAgentSession();
     });
   });
 
-  createEffect(() => {
-    const root = projectRoot();
+  createEffect(on(projectRoot, (root) => {
     if (!root) return;
     const saved = projectAgentPreferences()[root];
     const nextId = saved?.llmProfileId && llmProfiles().some(profile => profile.id === saved.llmProfileId)
       ? saved.llmProfileId
-      : llmProfiles()[0]?.id ?? "";
+      : llmProfiles().some(profile => profile.id === selectedLlmId())
+        ? selectedLlmId()
+        : llmProfiles()[0]?.id ?? "";
     setSelectedLlmId(nextId);
     setAgentSessionId("");
     setAgentState(emptyAgentState());
-  });
+    followInteractionBottom = true;
+  }));
 
   createEffect(() => {
     projectRoot();
     selectedLlmId();
     if (agentReady()) void openAgentSession();
   });
+
+  createEffect(() => {
+    agentState();
+    if (!followInteractionBottom) return;
+    queueMicrotask(() => {
+      if (!interactionScroll) return;
+      interactionScroll.scrollTop = interactionScroll.scrollHeight;
+    });
+  });
+
+  const resizeAiPanel = (event: PointerEvent) => {
+    if (!aiOpen()) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = aiPanelHeight();
+    const move = (moveEvent: PointerEvent) => {
+      setAiPanelHeight(clampAiPanelHeight(startHeight + startY - moveEvent.clientY, window.innerHeight));
+      if (followInteractionBottom) queueMicrotask(() => {
+        if (interactionScroll) interactionScroll.scrollTop = interactionScroll.scrollHeight;
+      });
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      localStorage.setItem(aiPanelHeightKey, String(aiPanelHeight()));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+  };
 
   const applyProjectFiles = (project: ProjectResponse) => {
     setProjectFiles(project.files);
@@ -715,16 +754,16 @@ export function App() {
 
   const openAiSettings = () => {
     const config = selectedLlm();
-    setProfileName(config?.name ?? "");
+    setCreatingLlmProfile(false);
+    setProfileProvider(config?.provider ?? "");
     setAiEndpoint(config?.endpoint ?? "");
     setAiModel(config?.model ?? "");
     setAiKey(config?.apiKey ?? "");
     setAiSettingsOpen(true);
   };
   const newLlmProfile = () => {
-    setSelectedLlmId("");
-    setAgentSessionId("");
-    setProfileName("");
+    setCreatingLlmProfile(true);
+    setProfileProvider("");
     setAiEndpoint("");
     setAiModel("");
     setAiKey("");
@@ -732,7 +771,7 @@ export function App() {
   };
   const deleteLlmProfile = () => {
     const profile = selectedLlm();
-    if (!profile || !window.confirm(`确定删除 LLM 配置“${profile.name}”？`)) return;
+    if (!profile || !window.confirm(`确定删除 ${profile.provider} 的模型“${profile.model}”？`)) return;
     const profiles = llmProfiles().filter(item => item.id !== profile.id);
     const projects = Object.fromEntries(Object.entries(projectAgentPreferences()).map(([root, preference]) => [
       root,
@@ -740,18 +779,11 @@ export function App() {
     ]));
     setLlmProfiles(profiles);
     setProjectAgentPreferences(projects);
-    setSelectedLlmId("");
+    const nextId = profiles[0]?.id ?? "";
+    setSelectedLlmId(nextId);
     setAgentSessionId("");
-    persistAgentPreferences(profiles, projects);
+    persistAgentPreferences(profiles, projects, nextId);
     setAiSettingsOpen(false);
-  };
-  const openAgentConfigDirectory = async () => {
-    const directory = await invoke<string>("agent_config_directory");
-    await openPath(directory);
-  };
-  const reloadAgentConfig = async () => {
-    await sendAgentCommand({ type: "reload_config", requestId: crypto.randomUUID(), agentId: "omp" });
-    showToolbarMessage("Agent 配置已重新加载", "success");
   };
   const restartAgent = async () => {
     setAgentStatus("正在重新启动 Agent...");
@@ -763,20 +795,20 @@ export function App() {
     setAiSettingsOpen(false);
   };
   const applyAiSettings = () => {
-    if (!profileName().trim() || !aiEndpoint().trim() || !aiModel().trim()) {
-      showToolbarMessage("LLM 配置名称、Endpoint 和 Model 不能为空", "warning");
+    if (!profileProvider().trim() || !aiEndpoint().trim() || !aiModel().trim()) {
+      showToolbarMessage("Provider、Endpoint 和 Model 不能为空", "warning");
       return;
     }
-    const existing = selectedLlm();
+    const existing = creatingLlmProfile() ? undefined : selectedLlm();
     const profile: LlmProfile = {
       id: existing?.id ?? crypto.randomUUID(),
-      name: profileName().trim(),
+      provider: profileProvider().trim(),
       endpoint: aiEndpoint().trim(),
       model: aiModel().trim(),
       apiKey: aiKey(),
     };
-    if (llmProfiles().some(item => item.id !== profile.id && item.name === profile.name)) {
-      showToolbarMessage("LLM 配置名称必须唯一", "warning");
+    if (hasDuplicateLlmModel(llmProfiles(), profile)) {
+      showToolbarMessage("同一 Provider 下的模型名称不能重复", "warning");
       return;
     }
     const profiles = existing
@@ -784,13 +816,14 @@ export function App() {
       : [...llmProfiles(), profile];
     setLlmProfiles(profiles);
     setSelectedLlmId(profile.id);
+    setCreatingLlmProfile(false);
     setAgentSessionId("");
     const root = projectRoot();
     const projects = root
       ? { ...projectAgentPreferences(), [root]: { agentId: "omp", llmProfileId: profile.id } }
       : projectAgentPreferences();
     setProjectAgentPreferences(projects);
-    persistAgentPreferences(profiles, projects);
+    persistAgentPreferences(profiles, projects, profile.id);
     setAiSettingsOpen(false);
     showToolbarMessage("LLM 配置已应用", "success");
   };
@@ -1064,14 +1097,20 @@ export function App() {
           </div>
         </aside>
       </section>
-      <section class={`ai-dock ${aiOpen() ? "" : "collapsed"}`}>
-        <button
-          class="ai-dock-toggle"
-          aria-label={aiOpen() ? "收起 AI 工作台" : "展开 AI 工作台"}
-          onClick={() => setAiOpen(!aiOpen())}
-        >
-          <span />
-        </button>
+      <section
+        class={`ai-dock ${aiOpen() ? "" : "collapsed"}`}
+        style={`--ai-panel-height: ${aiPanelHeight()}px`}
+      >
+        <div class="ai-dock-resize" onPointerDown={resizeAiPanel}>
+          <button
+            class="ai-dock-toggle"
+            aria-label={aiOpen() ? "收起 AI 工作台" : "展开 AI 工作台"}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setAiOpen(!aiOpen())}
+          >
+            <span />
+          </button>
+        </div>
         <Show when={aiOpen()}>
           <div class="ai-body">
             <div class="ai-interaction">
@@ -1080,29 +1119,32 @@ export function App() {
                 <label>LLM
                   <select
                     value={selectedLlmId()}
-                    disabled={aiRunning()}
+                    disabled={aiRunning() || llmProfiles().length === 0}
                     onChange={(event) => {
                       const llmProfileId = event.currentTarget.value;
                       setSelectedLlmId(llmProfileId);
                       setAgentSessionId("");
                       const root = projectRoot();
-                      if (!root) return;
-                      const projects = { ...projectAgentPreferences(), [root]: { agentId: "omp", llmProfileId } };
+                      const projects = root
+                        ? { ...projectAgentPreferences(), [root]: { agentId: "omp", llmProfileId } }
+                        : projectAgentPreferences();
                       setProjectAgentPreferences(projects);
-                      persistAgentPreferences(llmProfiles(), projects);
+                      persistAgentPreferences(llmProfiles(), projects, llmProfileId);
                     }}
                   >
-                    <option value="">选择 LLM 配置</option>
-                    <For each={llmProfiles()}>{profile => <option value={profile.id}>{profile.name} · {profile.model}</option>}</For>
+                    <For each={llmProfiles()}>{profile => <option value={profile.id}>{profile.provider} · {profile.model}</option>}</For>
                   </select>
                 </label>
                 <span>{agentStatus()}</span>
-                <button onClick={newLlmProfile} disabled={aiRunning()}>新建 LLM</button>
-                <button onClick={() => void openAgentConfigDirectory()} disabled={aiRunning()}>配置目录</button>
-                <button onClick={() => void reloadAgentConfig()} disabled={aiRunning() || !agentSessionId()}>重载</button>
                 <Show when={!agentReady()}><button onClick={() => void restartAgent()}>重启</button></Show>
               </div>
-              <div class="ai-interaction-scroll">
+              <div
+                ref={interactionScroll}
+                class="ai-interaction-scroll"
+                onScroll={(event) => {
+                  followInteractionBottom = isNearScrollBottom(event.currentTarget);
+                }}
+              >
                 <Show
                   when={agentState().timeline.length}
                   fallback={
@@ -1116,22 +1158,13 @@ export function App() {
                       const message = () => agentState().messages.find(value => value.id === item.id);
                       const tool = () => agentState().tools.find(value => value.id === item.id);
                       const interaction = () => agentState().interactions.find(value => value.id === item.id);
-                      const raw = () => agentState().rawEvents.find(value => value.id === item.id);
                       return item.kind === "message" && message() ? (
                         <div class={`ai-turn ${message()!.role}`}>
-                          <span>{message()!.role === "user" ? "你" : message()!.role === "steering" ? "引导" : message()!.role === "notice" ? "状态" : "AI"}</span>
+                          <span>{message()!.role === "user" ? "你" : message()!.role === "steering" ? "引导" : "AI"}</span>
                           <div class="ai-turn-body"><p>{message()!.text}</p></div>
                         </div>
                       ) : item.kind === "tool" && tool() ? (
-                        <button
-                          class={`agent-tool-card ${tool()!.status}`}
-                          onClick={() => setAgentState(state => ({ ...state, tools: state.tools.map(value => value.id === item.id ? { ...value, expanded: !value.expanded } : value) }))}
-                        >
-                          <span>{tool()!.status === "running" ? "◌" : tool()!.status === "completed" ? "✓" : "!"}</span>
-                          <strong>{tool()!.name}</strong>
-                          <small>{tool()!.expanded ? "收起" : "展开"}</small>
-                          <Show when={tool()!.expanded}><pre>{JSON.stringify({ input: tool()!.input, update: tool()!.update, result: tool()!.result }, null, 2)}</pre></Show>
-                        </button>
+                        <AgentToolCard tool={tool()!} />
                       ) : item.kind === "interaction" && interaction() ? (
                         <div class="agent-interaction-card">
                           <strong>{interaction()!.title}</strong>
@@ -1155,14 +1188,6 @@ export function App() {
                             </div>
                           </Show>
                         </div>
-                      ) : item.kind === "raw" && raw() ? (
-                        <button
-                          class="agent-tool-card raw"
-                          onClick={() => setAgentState(state => ({ ...state, rawEvents: state.rawEvents.map(value => value.id === item.id ? { ...value, expanded: !value.expanded } : value) }))}
-                        >
-                          <span>·</span><strong>{raw()!.name}</strong><small>{raw()!.expanded ? "收起" : "展开"}</small>
-                          <Show when={raw()!.expanded}><pre>{JSON.stringify(raw()!.payload, null, 2)}</pre></Show>
-                        </button>
                       ) : null;
                     }}
                   </For>
@@ -1173,8 +1198,8 @@ export function App() {
               <Show when={aiSettingsOpen()}>
                 <div class="ai-settings-popover">
                   <label>
-                    <span>Name</span>
-                    <input value={profileName()} onInput={(event) => setProfileName(event.currentTarget.value)} />
+                    <span>Provider</span>
+                    <input value={profileProvider()} onInput={(event) => setProfileProvider(event.currentTarget.value)} />
                   </label>
                   <label>
                     <span>Endpoint</span>
@@ -1202,8 +1227,9 @@ export function App() {
                     />
                   </label>
                   <div class="llm-settings-actions">
-                    <Show when={selectedLlm()}><button onClick={deleteLlmProfile}>删除</button></Show>
-                    <button onClick={applyAiSettings}>{selectedLlm() ? "保存" : "新增"}</button>
+                    <button onClick={applyAiSettings}>保存</button>
+                    <Show when={selectedLlm() && !creatingLlmProfile()}><button class="llm-delete" onClick={deleteLlmProfile}>删除</button></Show>
+                    <button onClick={newLlmProfile}>+</button>
                   </div>
                 </div>
               </Show>
@@ -1253,6 +1279,73 @@ export function App() {
         </Show>
       </section>
     </main>
+  );
+}
+
+function AgentToolCard(props: { tool: AgentTool }) {
+  const [expanded, setExpanded] = createSignal(true);
+  const [collapsible, setCollapsible] = createSignal(false);
+  let content: HTMLDivElement | undefined;
+  let autoCollapsed = false;
+  let manuallyToggled = false;
+  createEffect(() => {
+    props.tool.input;
+    props.tool.update;
+    props.tool.result;
+    queueMicrotask(() => {
+      if (!content) return;
+      const overflowing = content.scrollHeight > 160;
+      setCollapsible(overflowing);
+      if (overflowing && !autoCollapsed && !manuallyToggled) {
+        autoCollapsed = true;
+        setExpanded(false);
+      }
+    });
+  });
+  const toggle = () => {
+    manuallyToggled = true;
+    setExpanded(!expanded());
+  };
+  return (
+    <section class={`agent-tool-card ${props.tool.status}`}>
+      <div class="agent-tool-heading">
+        <span>{props.tool.status === "running" ? "◌" : props.tool.status === "completed" ? "✓" : "!"}</span>
+        <strong>{props.tool.name}</strong>
+        <Show when={collapsible()}>
+          <button onClick={toggle}>{expanded() ? "收起" : "展开"}</button>
+        </Show>
+      </div>
+      <div ref={content} class={`agent-tool-content ${expanded() ? "" : "collapsed"}`}>
+        <ToolValue label="输入" value={props.tool.input} />
+        <Show when={props.tool.update !== undefined}><ToolValue label="进度" value={props.tool.update} /></Show>
+        <Show when={props.tool.result !== undefined}><ToolValue label="结果" value={props.tool.result} /></Show>
+      </div>
+    </section>
+  );
+}
+
+function ToolValue(props: { label: string; value: unknown }) {
+  const objectValue = () => props.value && typeof props.value === "object" && !Array.isArray(props.value)
+    ? Object.entries(props.value as Record<string, unknown>)
+    : [];
+  const displayValue = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return (
+    <div class="tool-value">
+      <strong>{props.label}</strong>
+      <Show
+        when={objectValue().length}
+        fallback={<pre>{displayValue(props.value)}</pre>}
+      >
+        <dl>
+          <For each={objectValue()}>{([key, value]) => (
+            <div class={`tool-field tool-field-${key.toLowerCase()}`}>
+              <dt>{key}</dt>
+              <dd><pre>{displayValue(value)}</pre></dd>
+            </div>
+          )}</For>
+        </dl>
+      </Show>
+    </div>
   );
 }
 

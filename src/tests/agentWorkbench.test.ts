@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyAgentEvent,
+  hasDuplicateLlmModel,
   loadAgentPreferences,
   saveAgentPreferences,
   type AgentWorkbenchState,
@@ -14,17 +15,61 @@ describe('agent workbench preferences', () => {
       setItem: (key: string, value: string) => storage.set(key, value),
     };
     const preferences = {
-      profiles: [{ id: 'local', name: '本地模型', endpoint: 'http://localhost/v1', model: 'qwen', apiKey: '' }],
+      profiles: [{ id: 'local', provider: '本地服务', endpoint: 'http://localhost/v1', model: 'qwen', apiKey: '' }],
       projects: { 'C:/paper': { agentId: 'omp', llmProfileId: 'local' } },
+      selectedLlmId: 'local',
     };
 
     saveAgentPreferences(preferences, localStorage);
     expect(loadAgentPreferences(localStorage)).toEqual(preferences);
   });
+
+  it('loads older preferences without a saved selection', () => {
+    const storage = new Map<string, string>([[
+      'papercompile.agent.preferences',
+      JSON.stringify({
+        profiles: [{ id: 'local', name: '本地服务', endpoint: 'http://localhost/v1', model: 'qwen', apiKey: '' }],
+        projects: {},
+      }),
+    ]]);
+    const localStorage = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    };
+
+    expect(loadAgentPreferences(localStorage)).toMatchObject({
+      selectedLlmId: 'local',
+      profiles: [{ id: 'local', provider: '本地服务', model: 'qwen' }],
+    });
+  });
+
+  it('only rejects duplicate model names within the same provider', () => {
+    const profiles = [
+      { id: 'one', provider: 'OpenAI', endpoint: 'https://one.example/v1', model: 'gpt-5', apiKey: '' },
+      { id: 'two', provider: 'Other', endpoint: 'https://two.example/v1', model: 'gpt-5', apiKey: '' },
+    ];
+
+    expect(hasDuplicateLlmModel(profiles, { id: 'new', provider: 'OpenAI', model: 'gpt-5' })).toBe(true);
+    expect(hasDuplicateLlmModel(profiles, { id: 'new', provider: 'Other', model: 'gpt-6' })).toBe(false);
+    expect(hasDuplicateLlmModel(profiles, { id: 'one', provider: 'OpenAI', model: 'gpt-5' })).toBe(false);
+  });
 });
 
 describe('agent event reduction', () => {
-  it('keeps tool calls collapsed while preserving full input and result', () => {
+  it('returns to the send state on abort without deleting OMP output', () => {
+    const initial: AgentWorkbenchState = {
+      messages: [{ id: 'm', role: 'assistant', text: 'partial' }],
+      tools: [],
+      interactions: [{ id: 'i', interaction: 'confirm', title: 'Allow?' }],
+      rawEvents: [],
+      timeline: [{ kind: 'message', id: 'm' }, { kind: 'interaction', id: 'i' }],
+      running: true,
+    };
+
+    expect(applyAgentEvent(initial, { type: 'run_aborted' })).toEqual({ ...initial, running: false });
+  });
+
+  it('preserves full tool input and result for presentation', () => {
     const initial: AgentWorkbenchState = { messages: [], tools: [], interactions: [], rawEvents: [], timeline: [], running: false };
     const started = applyAgentEvent(initial, {
       type: 'tool_started', sessionId: 's', runId: 'r', toolCallId: 't', name: 'read', input: { path: 'main.tex' },
@@ -34,7 +79,7 @@ describe('agent event reduction', () => {
     });
 
     expect(finished.tools).toEqual([{
-      id: 't', name: 'read', input: { path: 'main.tex' }, result: { text: 'source' }, status: 'completed', expanded: false,
+      id: 't', name: 'read', input: { path: 'main.tex' }, result: { text: 'source' }, status: 'completed',
     }]);
     expect(finished.timeline).toEqual([{ kind: 'tool', id: 't' }]);
   });
@@ -54,7 +99,20 @@ describe('agent event reduction', () => {
     expect(raw.timeline).toEqual([
       { kind: 'message', id: 'm' },
       { kind: 'interaction', id: 'i' },
-      { kind: 'raw', id: 'raw-0' },
     ]);
+    expect(raw.rawEvents).toEqual([]);
+  });
+
+  it('keeps notices and lifecycle events out of the visible timeline', () => {
+    const initial: AgentWorkbenchState = { messages: [], tools: [], interactions: [], rawEvents: [], timeline: [], running: false };
+    const started = applyAgentEvent(initial, { type: 'run_started' });
+    const noticed = applyAgentEvent(started, { type: 'notice', message: 'agent_start' });
+    const raw = applyAgentEvent(noticed, { type: 'raw', name: 'agent_end', payload: {} });
+    const finished = applyAgentEvent(raw, { type: 'run_finished' });
+
+    expect(finished.timeline).toEqual([]);
+    expect(finished.messages).toEqual([]);
+    expect(finished.rawEvents).toEqual([]);
+    expect(finished.running).toBe(false);
   });
 });
