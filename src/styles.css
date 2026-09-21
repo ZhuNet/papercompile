@@ -58,7 +58,7 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .source-code pre, .source-code .source-editor { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 25px; overflow-y: auto; overflow-x: hidden; border: 0; outline: none; font: 12px/2 "Cascadia Code", "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; }
 .source-code pre { pointer-events: none; color: #d4d4d4; }
 .source-code .source-editor { z-index: 1; resize: none; background: transparent; color: transparent; caret-color: #f8f8f2; -webkit-text-fill-color: transparent; }
-.source-code .source-editor::selection { background: #264f78; }
+.source-code .source-editor::selection { color: #f8f8f2; background: rgb(38 79 120 / 68%); -webkit-text-fill-color: #f8f8f2; }
 .syntax-heading { color: #569cd6; font-weight: 700; }.syntax-list, .syntax-quote { color: #c586c0; }.syntax-link { color: #4ec9b0; }.syntax-code { color: #ce9178; }.syntax-key { color: #9cdcfe; }.syntax-literal, .syntax-number { color: #b5cea8; }
 .syntax-comment { color: #6a9955; }
 .syntax-command { color: #569cd6; }
@@ -68,6 +68,7 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 /* Compact split AI workbench: history left, composer right. */
 .ai-dock { display: grid; grid-template-rows: 4px 16px minmax(0, 1fr); height: var(--ai-panel-height, 190px); }
 .ai-dock.collapsed { grid-template-rows: 16px; height: 16px; }
+.ai-dock.collapsed .ai-body { height: 0; min-height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 .ai-dock-resize-edge { height: 4px; cursor: ns-resize; touch-action: none; }
 .ai-dock.collapsed .ai-dock-resize-edge { display: none; }
 .ai-dock-toggle { display: grid; width: 100%; height: 16px; padding: 0; place-items: center; border: 0; background: #172335; }

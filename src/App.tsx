@@ -7,6 +7,7 @@ import {
   on,
   onCleanup,
   onMount,
+  untrack,
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -678,6 +679,11 @@ export function App() {
     }
     const text = prompt();
     const wasRunning = agentState().running;
+    followInteractionBottom = true;
+    queueMicrotask(() => {
+      if (!interactionScroll) return;
+      interactionScroll.scrollTop = interactionScroll.scrollHeight;
+    });
     setPrompt("");
     const runId = wasRunning ? activeRunId() : crypto.randomUUID();
     if (!runId) {
@@ -714,12 +720,13 @@ export function App() {
   };
 
   const stopAi = async () => {
-    if (!agentSessionId() || !activeRunId()) return;
+    if (!agentSessionId()) return;
+    const runId = activeRunId();
     await sendAgentCommand({
       type: "abort",
       requestId: crypto.randomUUID(),
       sessionId: agentSessionId(),
-      runId: activeRunId(),
+      runId,
     });
   };
 
@@ -1096,8 +1103,7 @@ export function App() {
         >
           <span />
         </button>
-        <Show when={aiOpen()}>
-          <div class="ai-body">
+        <div class="ai-body" aria-hidden={!aiOpen()}>
             <div class="ai-interaction">
               <div class="agent-controls">
                 <label>Agent <select disabled={aiRunning()}><option value="omp">Oh My Pi</option></select></label>
@@ -1260,8 +1266,7 @@ export function App() {
                 </button>
               </div>
             </div>
-          </div>
-        </Show>
+        </div>
       </section>
     </main>
   );
@@ -1448,29 +1453,43 @@ function SourceView(props: {
   let editor: HTMLTextAreaElement | undefined;
   const [searchQuery, setSearchQuery] = createSignal("");
   const [activeMatch, setActiveMatch] = createSignal(-1);
+  const [searchNavigation, setSearchNavigation] = createSignal(0);
   const language = () => textLanguageForPath(props.path);
   const matches = createMemo(() => findSourceMatches(props.content, searchQuery()));
   const moveToMatch = (direction: 1 | -1) => {
     setActiveMatch(nextSourceMatchIndex(activeMatch(), matches().length, direction));
+    setSearchNavigation(value => value + 1);
   };
+  let previousPath = props.path;
+  let previousQuery = searchQuery();
   createEffect(() => {
-    props.path;
-    searchQuery();
-    props.content;
-    setActiveMatch(matches().length ? 0 : -1);
+    const path = props.path;
+    const query = searchQuery();
+    const count = matches().length;
+    if (path !== previousPath || query !== previousQuery) {
+      previousPath = path;
+      previousQuery = query;
+      setActiveMatch(count ? 0 : -1);
+      setSearchNavigation(value => value + 1);
+      return;
+    }
+    if (count === 0) setActiveMatch(-1);
+    else if (activeMatch() >= count) setActiveMatch(count - 1);
   });
   createEffect(() => {
-    const index = activeMatch();
-    const match = matches()[index];
+    searchNavigation();
+    const match = untrack(() => matches()[activeMatch()]);
     if (!editor || !match) return;
     queueMicrotask(() => {
       if (!editor) return;
       editor.setSelectionRange(match.start, match.end);
-      const line = props.content.slice(0, match.start).split("\n").length - 1;
-      editor.scrollTop = Math.max(0, line * 24 - editor.clientHeight / 2);
       const pre = editor.previousElementSibling as HTMLElement | null;
-      if (pre) pre.scrollTop = editor.scrollTop;
-       props.onScrollPosition({ top: editor.scrollTop, left: 0 });
+      const matchElement = pre?.querySelector<HTMLElement>(".source-search-match.current");
+      if (matchElement) {
+        editor.scrollTop = Math.max(0, matchElement.offsetTop - editor.clientHeight / 2);
+        pre!.scrollTop = editor.scrollTop;
+      }
+      props.onScrollPosition({ top: editor.scrollTop, left: 0 });
     });
   });
   createEffect(() => {

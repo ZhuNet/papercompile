@@ -14,4 +14,5 @@ describe('AI timeline bottom following', () => {
     expect(isNearScrollBottom({ scrollTop: 676, clientHeight: 300, scrollHeight: 1000 })).toBe(true);
     expect(isNearScrollBottom({ scrollTop: 675, clientHeight: 300, scrollHeight: 1000 })).toBe(false);
   });
+
 });

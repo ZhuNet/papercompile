@@ -54,6 +54,7 @@ export async function createOmpRuntime(
     SessionManager,
     Settings,
   } = await import("@oh-my-pi/pi-coding-agent");
+  const { USER_INTERRUPT_LABEL } = await import("@oh-my-pi/pi-coding-agent/session/messages");
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
   if (previousUserProfile === undefined) delete process.env.USERPROFILE;
@@ -147,7 +148,7 @@ export async function createOmpRuntime(
       await result.session.steer(text, undefined, { attribution: "user" });
     },
     async abort() {
-      await result.session.abort({ reason: "Stopped by PaperCompile", goalReason: "interrupted" });
+      await result.session.abort({ reason: USER_INTERRUPT_LABEL, goalReason: "interrupted" });
     },
     async reload() {
       await result.session.refreshSkills();

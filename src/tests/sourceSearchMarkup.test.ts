@@ -24,6 +24,12 @@ describe('source search UI', () => {
     expect(styles).toContain('overflow-wrap: anywhere;');
     expect(styles).toContain('overflow-x: hidden;');
     expect(appSource).not.toContain('editor.scrollLeft = position.left');
+    expect(appSource).toContain('source-search-match.current');
+    expect(appSource).toContain('matchElement.offsetTop');
+    expect(appSource).toContain('let previousPath = props.path;');
+    expect(appSource).toContain('let previousQuery = searchQuery();');
+    expect(appSource).toContain('untrack(() => matches()[activeMatch()])');
+    expect(styles).toContain('.source-code .source-editor::selection { color: #f8f8f2;');
   });
 
   it('uses a compact 44px topbar', () => {

@@ -90,7 +90,7 @@ describe("SidecarService", () => {
     expect(events).toContainEqual({ type: "run_finished", sessionId: "omp:project", runId: "r" });
   });
 
-  it("reports an aborted run even when OMP abort fails", async () => {
+  it("does not report an aborted run when OMP abort fails", async () => {
     const events: unknown[] = [];
     const adapter = {
       id: "omp", name: "Oh My Pi",
@@ -111,6 +111,33 @@ describe("SidecarService", () => {
     await expect(service.handle({ type: "abort", requestId: "3", sessionId: "omp:project", runId: "r" }))
       .rejects.toThrow("abort failed");
 
+    expect(events).not.toContainEqual({ type: "run_aborted", sessionId: "omp:project", runId: "r" });
+  });
+
+  it("emits run_aborted only after OMP has finished aborting", async () => {
+    const events: unknown[] = [];
+    let finishAbort: (() => void) | undefined;
+    const adapter = {
+      id: "omp", name: "Oh My Pi",
+      openSession: async () => ({ sessionId: "omp:project", history: [] }),
+      prompt: async () => undefined,
+      steer: async () => undefined,
+      abort: async () => new Promise<void>(resolve => { finishAbort = resolve; }),
+      reload: async () => undefined,
+      dispose: async () => undefined,
+    };
+    const service = new SidecarService(adapter, event => events.push(event), async () => undefined);
+    await service.handle({ type: "initialize", requestId: "1", configRoot: "C:/data" });
+    await service.handle({
+      type: "open_session", requestId: "2", projectRoot: "C:/paper", agentId: "omp",
+      profile: { id: "p", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
+    });
+
+    const aborting = service.handle({ type: "abort", requestId: "3", sessionId: "omp:project", runId: "r" });
+    await Promise.resolve();
+    expect(events).not.toContainEqual({ type: "run_aborted", sessionId: "omp:project", runId: "r" });
+    finishAbort?.();
+    await aborting;
     expect(events).toContainEqual({ type: "run_aborted", sessionId: "omp:project", runId: "r" });
   });
 });

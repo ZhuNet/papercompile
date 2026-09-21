@@ -44,6 +44,9 @@ describe('AI workbench markup', () => {
     expect(appSource).toContain('interactionScroll.scrollTop = interactionScroll.scrollHeight');
     expect(styles).toContain('height: var(--ai-panel-height, 190px);');
     expect(styles).toContain('cursor: ns-resize;');
+    expect(appSource).toContain('followInteractionBottom = true;');
+    expect(appSource).not.toContain('<Show when={aiOpen()}>');
+    expect(styles).toContain('.ai-dock.collapsed .ai-body { height: 0;');
   });
 
   it('stretches both interaction and composer areas to the resized dock height', () => {
@@ -82,6 +85,8 @@ describe('AI workbench markup', () => {
     expect(appSource).toContain('type: wasRunning ? "steer" : "prompt"');
     expect(appSource).toContain('type: "abort"');
     expect(appSource).toContain('invoke("send_agent_command", { command })');
+    expect(appSource).toContain('const runId = activeRunId();');
+    expect(appSource).not.toContain('const runId = activeRunId();\n    setAgentState(state => ({ ...state, running: false }));');
   });
 
   it('drops the completion banner in favour of the send button state', () => {
