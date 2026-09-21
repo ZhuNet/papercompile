@@ -33,6 +33,7 @@ import {
 import { PdfPreview, TextDocumentPreview } from "./PdfPreview";
 import { SourceScrollPositions, type SourceScrollPosition } from "./sourceView";
 import { aiPanelHeightKey, clampAiPanelHeight, isNearScrollBottom } from "./aiPanel";
+import { findSourceMatches, highlightSourceMatches, nextSourceMatchIndex } from "./sourceSearch";
 import { highlightText, textLanguageForPath } from "./textSyntax";
 import {
   compiledPdfDocument,
@@ -1087,16 +1088,14 @@ export function App() {
         class={`ai-dock ${aiOpen() ? "" : "collapsed"}`}
         style={`--ai-panel-height: ${aiPanelHeight()}px`}
       >
-        <div class="ai-dock-resize" onPointerDown={resizeAiPanel}>
-          <button
-            class="ai-dock-toggle"
-            aria-label={aiOpen() ? "收起 AI 工作台" : "展开 AI 工作台"}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => setAiOpen(!aiOpen())}
-          >
-            <span />
-          </button>
-        </div>
+        <div class="ai-dock-resize-edge" onPointerDown={resizeAiPanel} />
+        <button
+          class="ai-dock-toggle"
+          aria-label={aiOpen() ? "收起 AI 工作台" : "展开 AI 工作台"}
+          onClick={() => setAiOpen(!aiOpen())}
+        >
+          <span />
+        </button>
         <Show when={aiOpen()}>
           <div class="ai-body">
             <div class="ai-interaction">
@@ -1447,7 +1446,33 @@ function SourceView(props: {
   onInput: (value: string) => void;
 }) {
   let editor: HTMLTextAreaElement | undefined;
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [activeMatch, setActiveMatch] = createSignal(-1);
   const language = () => textLanguageForPath(props.path);
+  const matches = createMemo(() => findSourceMatches(props.content, searchQuery()));
+  const moveToMatch = (direction: 1 | -1) => {
+    setActiveMatch(nextSourceMatchIndex(activeMatch(), matches().length, direction));
+  };
+  createEffect(() => {
+    props.path;
+    searchQuery();
+    props.content;
+    setActiveMatch(matches().length ? 0 : -1);
+  });
+  createEffect(() => {
+    const index = activeMatch();
+    const match = matches()[index];
+    if (!editor || !match) return;
+    queueMicrotask(() => {
+      if (!editor) return;
+      editor.setSelectionRange(match.start, match.end);
+      const line = props.content.slice(0, match.start).split("\n").length - 1;
+      editor.scrollTop = Math.max(0, line * 24 - editor.clientHeight / 2);
+      const pre = editor.previousElementSibling as HTMLElement | null;
+      if (pre) pre.scrollTop = editor.scrollTop;
+      props.onScrollPosition({ top: editor.scrollTop, left: editor.scrollLeft });
+    });
+  });
   createEffect(() => {
     props.path;
     const position = props.scrollPosition;
@@ -1466,12 +1491,27 @@ function SourceView(props: {
     <article class="source-wrap">
       <div class="source-header">
         <span>{props.path || "未选择文件"}</span>
+        <div class="source-search">
+          <input
+            value={searchQuery()}
+            placeholder="搜索当前文件"
+            onInput={(event) => setSearchQuery(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              moveToMatch(event.shiftKey ? -1 : 1);
+            }}
+          />
+          <button aria-label="上一个匹配" onClick={() => moveToMatch(-1)}>↑</button>
+          <button aria-label="下一个匹配" onClick={() => moveToMatch(1)}>↓</button>
+          <span>{matches().length ? `${activeMatch() + 1}/${matches().length}` : "0/0"}</span>
+        </div>
         <span>{props.editable ? language().label : "二进制资源 · 只读"}</span>
       </div>
       <div class="source-code">
         <pre
           aria-hidden="true"
-          innerHTML={`${highlightText(props.content, language().language)}\n`}
+          innerHTML={`${highlightSourceMatches(props.content, language().language, matches(), activeMatch())}\n`}
         />
         <textarea
           ref={editor}

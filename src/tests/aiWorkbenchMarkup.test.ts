@@ -38,7 +38,7 @@ describe('AI workbench markup', () => {
   });
 
   it('resizes the dock, persists its height, and smart-follows the bottom', () => {
-    expect(appSource).toContain('class="ai-dock-resize"');
+    expect(appSource).toContain('class="ai-dock-resize-edge"');
     expect(appSource).toContain('localStorage.setItem(aiPanelHeightKey');
     expect(appSource).toContain('isNearScrollBottom(event.currentTarget)');
     expect(appSource).toContain('interactionScroll.scrollTop = interactionScroll.scrollHeight');
