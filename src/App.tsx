@@ -876,25 +876,27 @@ export function App() {
           <span class="brand-mark">P</span>
           <span>PaperCompile</span>
         </div>
-        <div class="project-name">
-          <div>
-            <button class="project-button" onClick={openProject} disabled={aiRunning()}>
-              {projectName()}
-            </button>
-            <span> / {entryFile() || "未选择入口"}</span>
-          </div>
+        <div class="project-location">
           <button
-            class="project-path"
+            class="project-folder-button"
+            aria-label="打开项目文件夹"
+            title="打开项目文件夹"
+            onClick={openProject}
             disabled={aiRunning()}
-            title={projectRoot() || "点击打开项目"}
-            onClick={() =>
-              projectRoot()
-                ? navigator.clipboard?.writeText(projectRoot())
-                : openProject()
-            }
           >
-            {projectRoot() || "点击选择 LaTeX 项目文件夹"}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 6.5h7l2 2h9v10.5H3z" />
+              <path d="M3 6.5V5h7l2 2" />
+            </svg>
           </button>
+          <Show when={projectRoot()}>
+            <div
+              class="project-path-display"
+              title={projectRoot()}
+            >
+              {projectRoot()}
+            </div>
+          </Show>
         </div>
         <div class="top-actions">
           <button title="保存" aria-label="保存" onClick={saveProject}>
