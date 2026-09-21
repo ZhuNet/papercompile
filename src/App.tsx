@@ -1470,7 +1470,7 @@ function SourceView(props: {
       editor.scrollTop = Math.max(0, line * 24 - editor.clientHeight / 2);
       const pre = editor.previousElementSibling as HTMLElement | null;
       if (pre) pre.scrollTop = editor.scrollTop;
-      props.onScrollPosition({ top: editor.scrollTop, left: editor.scrollLeft });
+       props.onScrollPosition({ top: editor.scrollTop, left: 0 });
     });
   });
   createEffect(() => {
@@ -1479,11 +1479,9 @@ function SourceView(props: {
     queueMicrotask(() => {
       if (!editor) return;
       editor.scrollTop = position.top;
-      editor.scrollLeft = position.left;
       const pre = editor.previousElementSibling as HTMLElement | null;
       if (pre) {
         pre.scrollTop = position.top;
-        pre.scrollLeft = position.left;
       }
     });
   });
@@ -1523,10 +1521,9 @@ function SourceView(props: {
             const pre = event.currentTarget
               .previousElementSibling as HTMLElement;
             pre.scrollTop = event.currentTarget.scrollTop;
-            pre.scrollLeft = event.currentTarget.scrollLeft;
             props.onScrollPosition({
               top: event.currentTarget.scrollTop,
-              left: event.currentTarget.scrollLeft,
+              left: 0,
             });
           }}
           placeholder={

@@ -55,7 +55,7 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .reopen-ai { position: fixed; bottom: 5px; left: 50%; width: 0; height: 0; padding: 0; transform: translateX(-50%); border: 7px solid transparent; border-bottom: 8px solid #172335; background: transparent; }
 .source-wrap { background: #1e1e1e; }
 .source-code { position: relative; height: calc(100% - 41px); overflow: hidden; }
-.source-code pre, .source-code .source-editor { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 25px; overflow: auto; border: 0; outline: none; font: 12px/2 "Cascadia Code", "Cascadia Mono", Consolas, monospace; tab-size: 2; white-space: pre; }
+.source-code pre, .source-code .source-editor { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 25px; overflow-y: auto; overflow-x: hidden; border: 0; outline: none; font: 12px/2 "Cascadia Code", "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; }
 .source-code pre { pointer-events: none; color: #d4d4d4; }
 .source-code .source-editor { z-index: 1; resize: none; background: transparent; color: transparent; caret-color: #f8f8f2; -webkit-text-fill-color: transparent; }
 .source-code .source-editor::selection { background: #264f78; }
@@ -66,13 +66,13 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .syntax-option, .syntax-string { color: #ce9178; }
 
 /* Compact split AI workbench: history left, composer right. */
-.ai-dock { display: grid; grid-template-rows: 4px 18px minmax(0, 1fr); height: var(--ai-panel-height, 190px); }
-.ai-dock.collapsed { grid-template-rows: 18px; height: 18px; }
+.ai-dock { display: grid; grid-template-rows: 4px 16px minmax(0, 1fr); height: var(--ai-panel-height, 190px); }
+.ai-dock.collapsed { grid-template-rows: 16px; height: 16px; }
 .ai-dock-resize-edge { height: 4px; cursor: ns-resize; touch-action: none; }
 .ai-dock.collapsed .ai-dock-resize-edge { display: none; }
-.ai-dock-toggle { display: grid; width: 100%; height: 18px; padding: 0; place-items: center; border: 0; background: #172335; }
+.ai-dock-toggle { display: grid; width: 100%; height: 16px; padding: 0; place-items: center; border: 0; background: #172335; }
 .ai-dock-toggle:hover { background: #1d2b40; }
-.ai-dock-toggle span { width: 22px; height: 7px; background: #9aa5b4; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.ai-dock-toggle span { width: 22px; height: 6px; background: #9aa5b4; clip-path: polygon(0 0, 100% 0, 50% 100%); }
 .ai-dock.collapsed .ai-dock-toggle span { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .ai-dock .ai-body { display: grid; grid-template-columns: minmax(0, 72fr) minmax(260px, 28fr); gap: 10px; width: 100%; height: 100%; min-height: 0; max-width: none; padding: 4px 10px 10px; }
 .ai-interaction, .ai-composer { height: 100%; min-height: 0; }

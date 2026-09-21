@@ -11,12 +11,19 @@ describe('source search UI', () => {
     expect(appSource).toContain('highlightSourceMatches(');
   });
 
-  it('separates the 18px toggle strip from the 4px resize edge', () => {
+  it('separates the 16px toggle strip from the 4px resize edge', () => {
     expect(appSource).toContain('class="ai-dock-resize-edge"');
     expect(appSource).toContain('class="ai-dock-toggle"');
-    expect(styles).toContain('grid-template-rows: 4px 18px minmax(0, 1fr);');
+    expect(styles).toContain('grid-template-rows: 4px 16px minmax(0, 1fr);');
     expect(styles).toContain('.ai-dock-resize-edge { height: 4px;');
-    expect(styles).toContain('.ai-dock-toggle { display: grid; width: 100%; height: 18px;');
+    expect(styles).toContain('.ai-dock-toggle { display: grid; width: 100%; height: 16px;');
+  });
+
+  it('wraps both source layers and removes horizontal scrolling', () => {
+    expect(styles).toContain('white-space: pre-wrap;');
+    expect(styles).toContain('overflow-wrap: anywhere;');
+    expect(styles).toContain('overflow-x: hidden;');
+    expect(appSource).not.toContain('editor.scrollLeft = position.left');
   });
 
   it('uses a compact 44px topbar', () => {

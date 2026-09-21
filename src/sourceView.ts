@@ -9,7 +9,7 @@ export class SourceScrollPositions {
 
   set(path: string, position: SourceScrollPosition): void {
     if (!path) return;
-    this.positions.set(path, position);
+    this.positions.set(path, { top: position.top, left: 0 });
   }
 
   clear(): void {
