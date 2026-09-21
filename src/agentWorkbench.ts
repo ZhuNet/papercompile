@@ -81,6 +81,62 @@ export function saveAgentPreferences(
   storage.setItem(preferencesKey, JSON.stringify(preferences));
 }
 
+function historyText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.flatMap(part =>
+    part && typeof part === 'object' && 'text' in part ? [String(part.text)] : [],
+  ).join('');
+}
+
+export function restoreAgentHistory(history: unknown[]): AgentWorkbenchState {
+  const state: AgentWorkbenchState = {
+    messages: [], tools: [], interactions: [], rawEvents: [], timeline: [], running: false,
+  };
+  const toolIndexes = new Map<string, number>();
+  history.forEach((value, index) => {
+    if (!value || typeof value !== 'object') return;
+    const message = value as Record<string, unknown>;
+    const role = String(message.role ?? '');
+    if (role === 'user' || role === 'assistant') {
+      const text = historyText(message.content);
+      if (text) {
+        const id = `history-${index}`;
+        state.messages.push({ id, role, text });
+        state.timeline.push({ kind: 'message', id });
+      }
+      if (role === 'assistant' && Array.isArray(message.content)) {
+        for (const part of message.content) {
+          if (!part || typeof part !== 'object') continue;
+          const block = part as Record<string, unknown>;
+          if (block.type !== 'toolCall' || !block.id || !block.name) continue;
+          const tool: AgentTool = {
+            id: String(block.id),
+            name: String(block.name),
+            input: block.arguments,
+            status: 'running',
+          };
+          toolIndexes.set(tool.id, state.tools.length);
+          state.tools.push(tool);
+          state.timeline.push({ kind: 'tool', id: tool.id });
+        }
+      }
+      return;
+    }
+    if (role !== 'toolResult') return;
+    const toolCallId = String(message.toolCallId ?? '');
+    const toolIndex = toolIndexes.get(toolCallId);
+    if (toolIndex === undefined) return;
+    const text = historyText(message.content);
+    state.tools[toolIndex] = {
+      ...state.tools[toolIndex],
+      result: message.details ?? text,
+      status: message.isError === true ? 'failed' : 'completed',
+    };
+  });
+  return state;
+}
+
 export function applyAgentEvent(state: AgentWorkbenchState, event: AgentEvent): AgentWorkbenchState {
   if (event.type === 'run_started') return { ...state, running: true };
   if (event.type === 'run_finished' || event.type === 'run_aborted') return { ...state, running: false };

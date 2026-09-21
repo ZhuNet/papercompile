@@ -66,6 +66,9 @@ describe('AI workbench markup', () => {
     expect(appSource).not.toContain('JSON.stringify({ input: tool()!.input, update: tool()!.update, result: tool()!.result }, null, 2)');
     expect(appSource).toContain('class="agent-interaction-card"');
     expect(appSource).not.toContain('class="agent-tool-card raw"');
+    expect(appSource).toContain('{expanded() ? "−" : "+"}');
+    expect(styles).toContain('.agent-tool-card {');
+    expect(styles).toContain('background: transparent;');
   });
 
   it('emphasizes user prompts and increases interaction typography', () => {

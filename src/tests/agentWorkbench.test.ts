@@ -3,6 +3,7 @@ import {
   applyAgentEvent,
   hasDuplicateLlmModel,
   loadAgentPreferences,
+  restoreAgentHistory,
   saveAgentPreferences,
   type AgentWorkbenchState,
 } from '../agentWorkbench';
@@ -56,6 +57,24 @@ describe('agent workbench preferences', () => {
 });
 
 describe('agent event reduction', () => {
+  it('restores tool calls and results in transcript order', () => {
+    const state = restoreAgentHistory([
+      { role: 'user', content: 'inspect' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 't1', name: 'read', arguments: { path: 'main.tex' } }] },
+      { role: 'toolResult', toolCallId: 't1', toolName: 'read', content: [{ type: 'text', text: 'source' }], details: { bytes: 42 }, isError: false },
+      { role: 'assistant', content: [{ type: 'text', text: 'finished' }] },
+    ]);
+
+    expect(state.timeline).toEqual([
+      { kind: 'message', id: 'history-0' },
+      { kind: 'tool', id: 't1' },
+      { kind: 'message', id: 'history-3' },
+    ]);
+    expect(state.tools[0]).toMatchObject({
+      id: 't1', name: 'read', input: { path: 'main.tex' }, result: { bytes: 42 }, status: 'completed',
+    });
+  });
+
   it('returns to the send state on abort without deleting OMP output', () => {
     const initial: AgentWorkbenchState = {
       messages: [{ id: 'm', role: 'assistant', text: 'partial' }],

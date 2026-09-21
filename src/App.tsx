@@ -43,6 +43,7 @@ import {
   applyAgentEvent,
   hasDuplicateLlmModel,
   loadAgentPreferences,
+  restoreAgentHistory,
   saveAgentPreferences,
   type AgentEvent,
   type AgentTool,
@@ -208,25 +209,8 @@ export function App() {
       }
       if (payload.type === "session_opened") {
         setAgentSessionId(String(payload.sessionId ?? ""));
-        const history = Array.isArray(payload.history) ? payload.history : [];
-        const messages = history.flatMap((message, index) => {
-          if (!message || typeof message !== "object") return [];
-          const role = "role" in message ? String(message.role) : "";
-          const content = "content" in message ? message.content : "";
-          const text = typeof content === "string"
-            ? content
-            : Array.isArray(content)
-              ? content.flatMap(part => part && typeof part === "object" && "text" in part ? [String(part.text)] : []).join("")
-              : "";
-          if (!text || (role !== "user" && role !== "assistant")) return [];
-          return [{ id: `history-${index}`, role: role as "user" | "assistant", text }];
-        });
         if (agentState().timeline.length === 0) {
-          setAgentState({
-            ...emptyAgentState(),
-            messages,
-            timeline: messages.map(message => ({ kind: "message" as const, id: message.id })),
-          });
+          setAgentState(restoreAgentHistory(Array.isArray(payload.history) ? payload.history : []));
         }
         setAgentStatus("");
         return;
@@ -1310,13 +1294,11 @@ function AgentToolCard(props: { tool: AgentTool }) {
   };
   return (
     <section class={`agent-tool-card ${props.tool.status}`}>
-      <div class="agent-tool-heading">
+      <button class="agent-tool-heading" onClick={toggle}>
         <span>{props.tool.status === "running" ? "◌" : props.tool.status === "completed" ? "✓" : "!"}</span>
         <strong>{props.tool.name}</strong>
-        <Show when={collapsible()}>
-          <button onClick={toggle}>{expanded() ? "收起" : "展开"}</button>
-        </Show>
-      </div>
+        <span>{expanded() ? "−" : "+"}</span>
+      </button>
       <div ref={content} class={`agent-tool-content ${expanded() ? "" : "collapsed"}`}>
         <ToolValue label="输入" value={props.tool.input} />
         <Show when={props.tool.update !== undefined}><ToolValue label="进度" value={props.tool.update} /></Show>
