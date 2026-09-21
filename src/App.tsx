@@ -1216,12 +1216,14 @@ export function App() {
                       onInput={(event) => setAiKey(event.currentTarget.value)}
                       placeholder="保存于本机"
                     />
+                    <div class="llm-settings-actions">
+                      <button aria-label="保存 LLM 配置" title="保存" onClick={applyAiSettings}>√</button>
+                      <Show when={selectedLlm() && !creatingLlmProfile()}>
+                        <button class="llm-delete" aria-label="删除 LLM 配置" title="删除" onClick={deleteLlmProfile}>×</button>
+                      </Show>
+                      <button aria-label="新建 LLM 配置" title="新建" onClick={newLlmProfile}>+</button>
+                    </div>
                   </label>
-                  <div class="llm-settings-actions">
-                    <button onClick={applyAiSettings}>保存</button>
-                    <Show when={selectedLlm() && !creatingLlmProfile()}><button class="llm-delete" onClick={deleteLlmProfile}>删除</button></Show>
-                    <button onClick={newLlmProfile}>+</button>
-                  </div>
                 </div>
               </Show>
               <textarea

@@ -16,12 +16,25 @@ describe('AI workbench markup', () => {
   });
 
   it('keeps LLM creation in the settings panel and removes advanced agent controls', () => {
-    expect(appSource).toContain('<button onClick={applyAiSettings}>保存</button>');
-    expect(appSource).toContain('<button onClick={newLlmProfile}>+</button>');
+    expect(appSource).toContain('aria-label="保存 LLM 配置"');
+    expect(appSource).toContain('title="保存"');
+    expect(appSource).toContain('>√</button>');
+    expect(appSource).toContain('aria-label="删除 LLM 配置"');
+    expect(appSource).toContain('>×</button>');
+    expect(appSource).toContain('aria-label="新建 LLM 配置"');
+    expect(appSource).toContain('>+</button>');
     expect(appSource).toContain('class="llm-delete"');
     expect(appSource).toContain('const [creatingLlmProfile, setCreatingLlmProfile] = createSignal(false);');
     expect(appSource).not.toContain('setSelectedLlmId("");\n    setAgentSessionId("");\n    setProfileName("");');
     expect(styles).toContain('.llm-settings-actions .llm-delete { background: #7f4545; }');
+    expect(styles).toContain('.llm-settings-actions button { width: 25px;');
+    expect(appSource).toContain('class="llm-settings-actions"');
+    expect(styles).toContain('grid-template-columns: 48px minmax(0, 1fr) auto;');
+    expect(styles).toContain('grid-template-rows: repeat(4, 25px);');
+    expect(styles).toContain('align-content: center;');
+    expect(styles).toContain('padding-right: 0;');
+    expect(styles).not.toContain('top: 96px;');
+    expect(styles).toContain('font-size: 16px;');
     expect(appSource).not.toContain('>新建 LLM</button>');
     expect(appSource).not.toContain('>配置目录</button>');
     expect(appSource).not.toContain('>重载</button>');

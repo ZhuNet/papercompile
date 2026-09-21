@@ -1,7 +1,7 @@
 export const aiPanelHeightKey = 'papercompile.ai.panel-height';
 
 export function clampAiPanelHeight(height: number, viewportHeight: number): number {
-  return Math.min(Math.max(height, 140), viewportHeight * 0.7);
+  return Math.min(Math.max(height, 190), viewportHeight * 0.7);
 }
 
 export function isNearScrollBottom(
