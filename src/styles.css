@@ -75,6 +75,7 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .ai-interaction { position: relative; display: grid; grid-template-rows: 30px minmax(0, 1fr); min-width: 0; overflow: hidden; border: 1px solid #314057; border-radius: 7px; background: #141f30; }
 .agent-controls { display: flex; align-items: center; gap: 7px; padding: 3px 8px; border-bottom: 1px solid #2b394d; color: #8290a4; font-size: 9px; }.agent-controls label { display: flex; align-items: center; gap: 4px; }.agent-controls select { max-width: 190px; height: 22px; border: 1px solid #3d4c61; border-radius: 4px; background: #202d41; color: #dce2e8; font-size: 9px; }.agent-controls > span { overflow: hidden; margin-left: auto; text-overflow: ellipsis; white-space: nowrap; }.agent-controls > button { height: 22px; padding: 0 7px; border: 1px solid #3d4c61; border-radius: 4px; background: #202d41; color: #aeb9c8; font-size: 9px; }.agent-controls > button:disabled { opacity: .45; }
 .ai-interaction-scroll { min-height: 0; overflow: auto; padding: 8px 12px; }
+.ai-interaction-scroll:empty::before { display: grid; height: 100%; place-items: center; color: #647287; font-size: 11px; content: "在右侧输入任务，操作记录将在这里显示。"; }
 .ai-interaction-scroll, .ai-composer > textarea { scrollbar-color: #47566b transparent; }
 .ai-interaction-scroll::-webkit-scrollbar, .ai-composer > textarea::-webkit-scrollbar { width: 8px; }
 .ai-interaction-scroll::-webkit-scrollbar-track, .ai-composer > textarea::-webkit-scrollbar-track { background: transparent; }

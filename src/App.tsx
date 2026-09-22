@@ -39,16 +39,13 @@ import {
   type PdfReadingState,
 } from "./pdfViewer";
 import {
-  applyAgentEvent,
   hasDuplicateLlmModel,
   loadAgentPreferences,
-  restoreAgentHistory,
   saveAgentPreferences,
   type AgentEvent,
-  type AgentTool,
-  type AgentWorkbenchState,
   type LlmProfile,
 } from "./agentWorkbench";
+import { AgentTranscript } from "./agentTranscript";
 type ProjectFile = {
   path: string;
   content?: string | null;
@@ -124,9 +121,7 @@ export function App() {
   const [activeRunId, setActiveRunId] = createSignal("");
   const [agentReady, setAgentReady] = createSignal(false);
   const [agentStatus, setAgentStatus] = createSignal("正在连接 Agent...");
-  const emptyAgentState = (): AgentWorkbenchState => ({ messages: [], tools: [], interactions: [], rawEvents: [], timeline: [], running: false });
-  const [agentState, setAgentState] = createSignal<AgentWorkbenchState>(emptyAgentState());
-  const aiRunning = createMemo(() => agentState().running);
+  const [aiRunning, setAiRunning] = createSignal(false);
   const [aiSettingsOpen, setAiSettingsOpen] = createSignal(false);
   const savedAiPanelHeight = Number(localStorage.getItem(aiPanelHeightKey));
   const [aiPanelHeight, setAiPanelHeight] = createSignal(
@@ -138,7 +133,17 @@ export function App() {
   const [aiModel, setAiModel] = createSignal("");
   const [aiKey, setAiKey] = createSignal("");
   let interactionScroll: HTMLDivElement | undefined;
+  let aiDock: HTMLElement | undefined;
   let followInteractionBottom = true;
+  const agentTranscript = new AgentTranscript(
+    (requestId, value) => void respondToInteraction(requestId, value),
+    () => {
+      if (!aiRunning() || !followInteractionBottom) return;
+      queueMicrotask(() => {
+        if (interactionScroll) interactionScroll.scrollTop = interactionScroll.scrollHeight;
+      });
+    },
+  );
   const dirty = createMemo(() =>
     workingFiles().some(
       (file) =>
@@ -208,21 +213,17 @@ export function App() {
       }
       if (payload.type === "session_opened") {
         setAgentSessionId(String(payload.sessionId ?? ""));
-        if (agentState().timeline.length === 0) {
-          setAgentState(restoreAgentHistory(Array.isArray(payload.history) ? payload.history : []));
-        }
+        if (!agentTranscript.hasContent()) agentTranscript.restore(Array.isArray(payload.history) ? payload.history : []);
         setAgentStatus("");
         return;
       }
-      if (payload.type === "interaction_requested") {
-        setAgentState(state => applyAgentEvent(state, payload));
-        return;
-      }
+      if (payload.type === "run_started") setAiRunning(true);
+      if (payload.type === "run_finished" || payload.type === "run_aborted") setAiRunning(false);
       if (payload.type === "error") {
         setAgentStatus(String(payload.message ?? "Agent 发生错误"));
         showToolbarMessage(`Agent 操作失败：${String(payload.message ?? "未知错误")}`, "error");
       }
-      setAgentState(state => applyAgentEvent(state, payload));
+      agentTranscript.append(payload);
       if (payload.type === "run_finished" || payload.type === "run_aborted") setActiveRunId("");
     }));
     unlisteners.push(listen<string>("agent-protocol-error", ({ payload }) => setAgentStatus(`Agent 协议错误：${payload}`)));
@@ -252,7 +253,8 @@ export function App() {
         : llmProfiles()[0]?.id ?? "";
     setSelectedLlmId(nextId);
     setAgentSessionId("");
-    setAgentState(emptyAgentState());
+    setAiRunning(false);
+    agentTranscript.clear();
     followInteractionBottom = true;
   }));
 
@@ -262,30 +264,21 @@ export function App() {
     if (agentReady()) void openAgentSession();
   });
 
-  createEffect(() => {
-    agentState();
-    if (!followInteractionBottom) return;
-    queueMicrotask(() => {
-      if (!interactionScroll) return;
-      interactionScroll.scrollTop = interactionScroll.scrollHeight;
-    });
-  });
-
   const resizeAiPanel = (event: PointerEvent) => {
     if (!aiOpen()) return;
     event.preventDefault();
     const startY = event.clientY;
     const startHeight = aiPanelHeight();
+    let nextHeight = startHeight;
     const move = (moveEvent: PointerEvent) => {
-      setAiPanelHeight(clampAiPanelHeight(startHeight + startY - moveEvent.clientY, window.innerHeight));
-      if (followInteractionBottom) queueMicrotask(() => {
-        if (interactionScroll) interactionScroll.scrollTop = interactionScroll.scrollHeight;
-      });
+      nextHeight = clampAiPanelHeight(startHeight + startY - moveEvent.clientY, window.innerHeight);
+      aiDock?.style.setProperty("--ai-panel-height", `${nextHeight}px`);
     };
     const finish = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
-      localStorage.setItem(aiPanelHeightKey, String(aiPanelHeight()));
+      setAiPanelHeight(nextHeight);
+      localStorage.setItem(aiPanelHeightKey, String(nextHeight));
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
@@ -675,12 +668,8 @@ export function App() {
       return;
     }
     const text = prompt();
-    const wasRunning = agentState().running;
+    const wasRunning = aiRunning();
     followInteractionBottom = true;
-    queueMicrotask(() => {
-      if (!interactionScroll) return;
-      interactionScroll.scrollTop = interactionScroll.scrollHeight;
-    });
     setPrompt("");
     const runId = wasRunning ? activeRunId() : crypto.randomUUID();
     if (!runId) {
@@ -688,19 +677,8 @@ export function App() {
       return;
     }
     if (!wasRunning) setActiveRunId(runId);
-    setAgentState(state => {
-      const id = crypto.randomUUID();
-      return {
-        ...state,
-        messages: [...state.messages, {
-        id,
-        role: wasRunning ? "steering" : "user",
-        text,
-      }],
-        timeline: [...state.timeline, { kind: "message", id }],
-      running: true,
-      };
-    });
+    setAiRunning(true);
+    agentTranscript.appendUser(crypto.randomUUID(), wasRunning ? "steering" : "user", text);
     try {
       await sendAgentCommand({
         type: wasRunning ? "steer" : "prompt",
@@ -710,7 +688,7 @@ export function App() {
         text,
       });
     } catch (error) {
-      setAgentState(state => ({ ...state, running: false }));
+      setAiRunning(false);
       if (!wasRunning) setActiveRunId("");
       showToolbarMessage(`AI 操作失败：${String(error)}`, "error");
     }
@@ -729,11 +707,7 @@ export function App() {
 
   const respondToInteraction = async (requestId: string, value: unknown) => {
     await sendAgentCommand({ type: "interaction_response", requestId, value });
-    setAgentState(state => ({
-      ...state,
-      interactions: state.interactions.filter(item => item.id !== requestId),
-      timeline: state.timeline.filter(item => !(item.kind === "interaction" && item.id === requestId)),
-    }));
+    agentTranscript.removeInteraction(requestId);
   };
 
   const toggleAiRun = () => {
@@ -1071,6 +1045,7 @@ export function App() {
         </aside>
       </section>
       <section
+        ref={aiDock}
         class={`ai-dock ${aiOpen() ? "" : "collapsed"}`}
         style={`--ai-panel-height: ${aiPanelHeight()}px`}
       >
@@ -1109,60 +1084,15 @@ export function App() {
                 <Show when={!agentReady()}><button onClick={() => void restartAgent()}>重启</button></Show>
               </div>
               <div
-                ref={interactionScroll}
                 class="ai-interaction-scroll"
                 onScroll={(event) => {
                   followInteractionBottom = isNearScrollBottom(event.currentTarget);
                 }}
-              >
-                <Show
-                  when={agentState().timeline.length}
-                  fallback={
-                    <div class="ai-interaction-empty">
-                      在右侧输入任务，操作记录将在这里显示。
-                    </div>
-                  }
-                >
-                  <For each={agentState().timeline}>
-                    {(item) => {
-                      const message = () => agentState().messages.find(value => value.id === item.id);
-                      const tool = () => agentState().tools.find(value => value.id === item.id);
-                      const interaction = () => agentState().interactions.find(value => value.id === item.id);
-                      return item.kind === "message" && message() ? (
-                        <div class={`ai-turn ${message()!.role}`}>
-                          <span>{message()!.role === "user" ? "你" : message()!.role === "steering" ? "引导" : "AI"}</span>
-                          <div class="ai-turn-body"><p>{message()!.text}</p></div>
-                        </div>
-                      ) : item.kind === "tool" && tool() ? (
-                        <AgentToolCard tool={tool()!} />
-                      ) : item.kind === "interaction" && interaction() ? (
-                        <div class="agent-interaction-card">
-                          <strong>{interaction()!.title}</strong>
-                          <Show when={interaction()!.message}><p>{interaction()!.message}</p></Show>
-                          <Show
-                            when={interaction()!.interaction === "confirm"}
-                            fallback={interaction()!.interaction === "select" ? (
-                              <div class="agent-interaction-actions">
-                                <For each={interaction()!.options ?? []}>{option => <button onClick={() => void respondToInteraction(item.id, typeof option === "object" && option && "label" in option ? option.label : option)}>{typeof option === "object" && option && "label" in option ? String(option.label) : String(option)}</button>}</For>
-                              </div>
-                            ) : (
-                              <form onSubmit={(event) => { event.preventDefault(); const input = event.currentTarget.elements.namedItem("agent-input") as HTMLInputElement; void respondToInteraction(item.id, input.value); }}>
-                                <input name="agent-input" placeholder={interaction()!.message ?? "输入响应"} />
-                                <button type="submit">提交</button>
-                              </form>
-                            )}
-                          >
-                            <div class="agent-interaction-actions">
-                              <button onClick={() => void respondToInteraction(item.id, true)}>允许</button>
-                              <button onClick={() => void respondToInteraction(item.id, false)}>拒绝</button>
-                            </div>
-                          </Show>
-                        </div>
-                      ) : null;
-                    }}
-                  </For>
-                </Show>
-              </div>
+                ref={(element) => {
+                  interactionScroll = element;
+                  agentTranscript.mount(element);
+                }}
+              />
             </div>
             <div class="ai-composer">
               <Show when={aiSettingsOpen()}>
@@ -1250,71 +1180,6 @@ export function App() {
         </div>
       </section>
     </main>
-  );
-}
-
-function AgentToolCard(props: { tool: AgentTool }) {
-  const [expanded, setExpanded] = createSignal(true);
-  const [collapsible, setCollapsible] = createSignal(false);
-  let content: HTMLDivElement | undefined;
-  let autoCollapsed = false;
-  let manuallyToggled = false;
-  createEffect(() => {
-    props.tool.input;
-    props.tool.update;
-    props.tool.result;
-    queueMicrotask(() => {
-      if (!content) return;
-      const overflowing = content.scrollHeight > 160;
-      setCollapsible(overflowing);
-      if (overflowing && !autoCollapsed && !manuallyToggled) {
-        autoCollapsed = true;
-        setExpanded(false);
-      }
-    });
-  });
-  const toggle = () => {
-    manuallyToggled = true;
-    setExpanded(!expanded());
-  };
-  return (
-    <section class={`agent-tool-card ${props.tool.status}`}>
-      <button class="agent-tool-heading" onClick={toggle}>
-        <span>{props.tool.status === "running" ? "◌" : props.tool.status === "completed" ? "✓" : "!"}</span>
-        <strong>{props.tool.name}</strong>
-        <span>{expanded() ? "−" : "+"}</span>
-      </button>
-      <div ref={content} class={`agent-tool-content ${expanded() ? "" : "collapsed"}`}>
-        <ToolValue label="输入" value={props.tool.input} />
-        <Show when={props.tool.update !== undefined}><ToolValue label="进度" value={props.tool.update} /></Show>
-        <Show when={props.tool.result !== undefined}><ToolValue label="结果" value={props.tool.result} /></Show>
-      </div>
-    </section>
-  );
-}
-
-function ToolValue(props: { label: string; value: unknown }) {
-  const objectValue = () => props.value && typeof props.value === "object" && !Array.isArray(props.value)
-    ? Object.entries(props.value as Record<string, unknown>)
-    : [];
-  const displayValue = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  return (
-    <div class="tool-value">
-      <strong>{props.label}</strong>
-      <Show
-        when={objectValue().length}
-        fallback={<pre>{displayValue(props.value)}</pre>}
-      >
-        <dl>
-          <For each={objectValue()}>{([key, value]) => (
-            <div class={`tool-field tool-field-${key.toLowerCase()}`}>
-              <dt>{key}</dt>
-              <dd><pre>{displayValue(value)}</pre></dd>
-            </div>
-          )}</For>
-        </dl>
-      </Show>
-    </div>
   );
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import appSource from '../App.tsx?raw';
+import transcriptSource from '../agentTranscript.ts?raw';
 import styles from '../styles.css?inline';
 
 describe('AI workbench markup', () => {
@@ -62,6 +63,26 @@ describe('AI workbench markup', () => {
     expect(styles).toContain('.ai-dock.collapsed .ai-body { height: 0;');
   });
 
+  it('appends backend events directly to an isolated transcript DOM', () => {
+    expect(appSource).toContain('agentTranscript.append(payload)');
+    expect(appSource).toContain('agentTranscript.restore(');
+    expect(appSource).not.toContain('createSignal<AgentWorkbenchState>');
+    expect(appSource).not.toContain('agentState().timeline');
+    expect(appSource).not.toContain('.messages.find(');
+    expect(appSource).not.toContain('.tools.find(');
+    expect(appSource).not.toContain('.interactions.find(');
+  });
+
+  it('keeps resize moves out of transcript and reactive state', () => {
+    expect(appSource).toContain('aiDock?.style.setProperty("--ai-panel-height"');
+    const resizeHandler = appSource.slice(
+      appSource.indexOf('const resizeAiPanel'),
+      appSource.indexOf('const applyProjectFiles'),
+    );
+    expect(resizeHandler).not.toContain('setAiPanelHeight(clampAiPanelHeight');
+    expect(resizeHandler).not.toContain('interactionScroll.scrollTop');
+  });
+
   it('stretches both interaction and composer areas to the resized dock height', () => {
     expect(styles).toContain('.ai-dock .ai-body {');
     expect(styles).toContain('height: 100%;');
@@ -69,20 +90,21 @@ describe('AI workbench markup', () => {
   });
 
   it('does not clear the timeline or replace it with history when the model changes', () => {
-    expect(appSource).toContain('if (agentState().timeline.length === 0)');
+    expect(appSource).toContain('if (!agentTranscript.hasContent()) agentTranscript.restore(');
     expect(appSource).toContain('createEffect(on(projectRoot, (root) => {');
-    expect(appSource).not.toContain('setSelectedLlmId(llmProfileId);\n                       setAgentSessionId("");\n                       setAgentState(emptyAgentState());');
+    expect(appSource).not.toContain('setSelectedLlmId(llmProfileId);\n                       setAgentSessionId("");\n                       agentTranscript.clear();');
   });
 
-  it('renders tool events as structured cards with height-aware collapsing', () => {
-    expect(appSource).toContain('<AgentToolCard');
-    expect(appSource).toContain('<ToolValue label="输入" value={props.tool.input} />');
-    expect(appSource).toContain('<ToolValue label="结果" value={props.tool.result} />');
-    expect(appSource).toContain('content.scrollHeight > 160');
-    expect(appSource).not.toContain('JSON.stringify({ input: tool()!.input, update: tool()!.update, result: tool()!.result }, null, 2)');
-    expect(appSource).toContain('class="agent-interaction-card"');
-    expect(appSource).not.toContain('class="agent-tool-card raw"');
-    expect(appSource).toContain('{expanded() ? "−" : "+"}');
+  it('renders transcript nodes directly and updates them by backend id', () => {
+    expect(transcriptSource).toContain("this.messages.get(id)");
+    expect(transcriptSource).toContain("existing.appendData(");
+    expect(transcriptSource).toContain("existing.appendData(String(event.text ?? ''));\n      return;");
+    expect(transcriptSource).toContain("this.tools.get(String(event.toolCallId))");
+    expect(transcriptSource).toContain("this.interactions.set(id, card)");
+    expect(transcriptSource).toContain("content.className = 'agent-tool-content collapsed'");
+    expect(transcriptSource).not.toContain('scrollHeight');
+    expect(transcriptSource).not.toContain('createSignal');
+    expect(transcriptSource).not.toContain('.find(');
     expect(styles).toContain('.agent-tool-card {');
     expect(styles).toContain('background: transparent;');
   });
