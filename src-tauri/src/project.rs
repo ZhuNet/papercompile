@@ -500,24 +500,10 @@ fn collect_files(
 }
 
 fn is_text_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "tex"
-                    | "bib"
-                    | "sty"
-                    | "cls"
-                    | "bst"
-                    | "txt"
-                    | "md"
-                    | "json"
-                    | "toml"
-                    | "yaml"
-                    | "yml"
-            )
-        })
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    !bytes.contains(&0) && std::str::from_utf8(&bytes).is_ok()
 }
 
 fn collect_tex(

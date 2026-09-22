@@ -13,7 +13,8 @@ describe('file tree creation markup', () => {
   });
 
   it('commits rename on outside pointer down and cancels it with Escape', () => {
-    expect(appSource).toContain('if (renamingPath() && !target.closest(".tree-rename")) {\n          commitRename();');
+    expect(appSource).toContain('if (renamingPath() && !target.closest(".tree-rename"))');
+    expect(appSource).toContain('commitRename();');
     expect(appSource).toContain('if (event.key === "Escape") props.onCancelRename();');
     expect(appSource).not.toContain('if (event.key === "Escape") props.onCommitRename();');
   });
@@ -32,7 +33,8 @@ describe('file tree creation markup', () => {
 
   it('continues selecting the clicked tree item after committing creation', () => {
     expect(appSource).toContain('const pendingTreeSelection = target.closest(".tree-item")');
-    expect(appSource).toContain('commitCreation((document.activeElement as HTMLInputElement | null)?.value ?? "");\n          selectPendingTreeItem(pendingTreeSelection);');
+    expect(appSource).toContain('commitCreation((document.activeElement as HTMLInputElement | null)?.value ?? "");');
+    expect(appSource).toContain('selectPendingTreeItem(pendingTreeSelection);');
   });
 
   it('submits every valid rename through the backend identity check', () => {

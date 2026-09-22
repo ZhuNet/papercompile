@@ -3,17 +3,15 @@ import appSource from '../App.tsx?raw';
 import styles from '../styles.css?inline';
 
 describe('toolbar messages', () => {
-  it('renders transient operation feedback in the toolbar instead of the AI dock or corner notice', () => {
+  it('renders transient operation feedback as a floating notice instead of the AI dock', () => {
     expect(appSource).toContain('class={`toolbar-message ${current().tone}`}');
     expect(appSource).not.toContain('class="ai-toast"');
     expect(appSource).not.toContain('project-notice');
     expect(styles).toContain('.toolbar-message');
     expect(styles).not.toContain('.ai-toast');
     expect(styles).not.toContain('.project-notice');
-    expect(styles).toContain('font-weight: 700');
-    expect(styles).not.toContain('.toolbar-message { position: absolute; left: 50%; z-index: 2; overflow: hidden; max-width: min(48vw, 620px); padding: 4px 10px;');
-    expect(styles).not.toContain('border: 1px solid #b8d0be');
-    expect(styles).not.toContain('background: #edf6ef');
+    expect(styles).toContain('position: fixed; top: 54px; right: 16px;');
+    expect(styles).toContain('pointer-events: none;');
   });
 
   it('uses separate success and error lifetimes and operation-specific failures', () => {

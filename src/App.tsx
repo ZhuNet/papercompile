@@ -7,7 +7,6 @@ import {
   on,
   onCleanup,
   onMount,
-  untrack,
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -34,8 +33,6 @@ import {
 import { PdfPreview, TextDocumentPreview } from "./PdfPreview";
 import { SourceScrollPositions, type SourceScrollPosition } from "./sourceView";
 import { aiPanelHeightKey, clampAiPanelHeight, isNearScrollBottom } from "./aiPanel";
-import { findSourceMatches, highlightSourceMatches, nextSourceMatchIndex } from "./sourceSearch";
-import { highlightText, textLanguageForPath } from "./textSyntax";
 import {
   compiledPdfDocument,
   type CompiledPdfDocument,
@@ -864,31 +861,15 @@ export function App() {
       }}
     >
       <header class="topbar">
-        <div class="brand">
-          <span class="brand-mark">P</span>
-          <span>PaperCompile</span>
-        </div>
-        <div class="project-location">
+        <div class="topbar-view-toggle">
           <button
-            class="project-folder-button"
-            aria-label="打开项目文件夹"
-            title="打开项目文件夹"
-            onClick={openProject}
-            disabled={aiRunning()}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 6.5h7l2 2h9v10.5H3z" />
-              <path d="M3 6.5V5h7l2 2" />
-            </svg>
-          </button>
-          <Show when={projectRoot()}>
-            <div
-              class="project-path-display"
-              title={projectRoot()}
-            >
-              {projectRoot()}
-            </div>
-          </Show>
+            class={view() === "source" ? "active" : ""}
+            onClick={() => setView("source")}
+          >源码</button>
+          <button
+            class={view() === "preview" ? "active" : ""}
+            onClick={() => setView("preview")}
+          >正文</button>
         </div>
         <div class="top-actions">
           <button title="保存" aria-label="保存" onClick={saveProject}>
@@ -925,36 +906,34 @@ export function App() {
           </button>
         </div>
       </header>
-      <nav class="toolbar">
-        <button
-          class={view() === "source" ? "active" : ""}
-          onClick={() => setView("source")}
-        >
-          源码
-        </button>
-        <button
-          class={view() === "preview" ? "active" : ""}
-          onClick={() => setView("preview")}
-        >
-          正文
-        </button>
-        <Show when={toolbarMessage()}>
-          {(current) => (
-            <div class={`toolbar-message ${current().tone}`}>
-              {current().text}
-            </div>
-          )}
-        </Show>
-        <span class="toolbar-spacer" />
-        <span class={`save-state ${dirty() ? "dirty" : ""}`}>
-          {dirty() ? "● 有未保存源码" : "✓ 源码已保存"}
-        </span>
-        <span class="compile-state">
-          <i /> {compileStatus()}
-        </span>
-      </nav>
+      <Show when={toolbarMessage()}>
+        {(current) => (
+          <div class={`toolbar-message ${current().tone}`}>
+            {current().text}
+          </div>
+        )}
+      </Show>
       <section class="workspace">
         <aside class="outline">
+          <div class="project-file-header">
+            <button
+              class="project-folder-button"
+              aria-label="打开项目文件夹"
+              title="打开项目文件夹"
+              onClick={openProject}
+              disabled={aiRunning()}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6.5h7l2 2h9v10.5H3z" />
+                <path d="M3 6.5V5h7l2 2" />
+              </svg>
+            </button>
+            <Show when={projectRoot()}>
+              <div class="project-path-display" title={projectRoot()}>
+                {projectRoot()}
+              </div>
+            </Show>
+          </div>
           <div class="files-heading">
             <strong>项目文件</strong>
           </div>
@@ -1452,105 +1431,70 @@ function SourceView(props: {
   onScrollPosition: (position: SourceScrollPosition) => void;
   onInput: (value: string) => void;
 }) {
-  let editor: HTMLTextAreaElement | undefined;
-  const [searchQuery, setSearchQuery] = createSignal("");
-  const [activeMatch, setActiveMatch] = createSignal(-1);
-  const [searchNavigation, setSearchNavigation] = createSignal(0);
-  const language = () => textLanguageForPath(props.path);
-  const matches = createMemo(() => findSourceMatches(props.content, searchQuery()));
-  const moveToMatch = (direction: 1 | -1) => {
-    setActiveMatch(nextSourceMatchIndex(activeMatch(), matches().length, direction));
-    setSearchNavigation(value => value + 1);
-  };
-  let previousPath = props.path;
-  let previousQuery = searchQuery();
+  let editor: HTMLDivElement | undefined;
+  let lineNumberGutter: HTMLDivElement | undefined;
+  const lineNumbers = createMemo(() => {
+    const count = Math.max(1, props.content.split("\n").length);
+    return Array.from({ length: count }, (_, index) => index + 1);
+  });
+
   createEffect(() => {
     const path = props.path;
-    const query = searchQuery();
-    const count = matches().length;
-    if (path !== previousPath || query !== previousQuery) {
-      previousPath = path;
-      previousQuery = query;
-      setActiveMatch(count ? 0 : -1);
-      setSearchNavigation(value => value + 1);
-      return;
-    }
-    if (count === 0) setActiveMatch(-1);
-    else if (activeMatch() >= count) setActiveMatch(count - 1);
-  });
-  createEffect(() => {
-    searchNavigation();
-    const match = untrack(() => matches()[activeMatch()]);
-    if (!editor || !match) return;
-    queueMicrotask(() => {
-      if (!editor) return;
-      editor.setSelectionRange(match.start, match.end);
-      const pre = editor.previousElementSibling as HTMLElement | null;
-      const matchElement = pre?.querySelector<HTMLElement>(".source-search-match.current");
-      if (matchElement) {
-        editor.scrollTop = Math.max(0, matchElement.offsetTop - editor.clientHeight / 2);
-        pre!.scrollTop = editor.scrollTop;
-      }
-      props.onScrollPosition({ top: editor.scrollTop, left: 0 });
-    });
-  });
-  createEffect(() => {
-    props.path;
+    const content = props.content;
     const position = props.scrollPosition;
+    void path;
     queueMicrotask(() => {
       if (!editor) return;
+      if (editor.textContent !== content) editor.textContent = content;
       editor.scrollTop = position.top;
-      const pre = editor.previousElementSibling as HTMLElement | null;
-      if (pre) {
-        pre.scrollTop = position.top;
-      }
+      editor.scrollLeft = 0;
+      if (lineNumberGutter) lineNumberGutter.scrollTop = editor.scrollTop;
     });
   });
+
+  const pastePlainText = (event: ClipboardEvent) => {
+    event.preventDefault();
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount || !editor.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(text);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    editor?.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
+  };
+
   return (
     <article class="source-wrap">
       <div class="source-header">
         <span>{props.path || "未选择文件"}</span>
-        <div class="source-search">
-          <input
-            value={searchQuery()}
-            placeholder="搜索当前文件"
-            onInput={(event) => setSearchQuery(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") return;
-              event.preventDefault();
-              moveToMatch(event.shiftKey ? -1 : 1);
-            }}
-          />
-          <button aria-label="上一个匹配" onClick={() => moveToMatch(-1)}>↑</button>
-          <button aria-label="下一个匹配" onClick={() => moveToMatch(1)}>↓</button>
-          <span>{matches().length ? `${activeMatch() + 1}/${matches().length}` : "0/0"}</span>
-        </div>
-        <span>{props.editable ? language().label : "二进制资源 · 只读"}</span>
       </div>
       <div class="source-code">
-        <pre
-          aria-hidden="true"
-          innerHTML={`${highlightSourceMatches(props.content, language().language, matches(), activeMatch())}\n`}
-        />
-        <textarea
-          ref={editor}
-          class="source-editor"
-          readOnly={!props.editable}
-          value={props.content}
-          onInput={(event) => props.onInput(event.currentTarget.value)}
-          onScroll={(event) => {
-            const pre = event.currentTarget
-              .previousElementSibling as HTMLElement;
-            pre.scrollTop = event.currentTarget.scrollTop;
-            props.onScrollPosition({
-              top: event.currentTarget.scrollTop,
-              left: 0,
-            });
-          }}
-          placeholder={
-            props.path ? "此资源不能作为文本编辑" : "打开项目后选择源码文件"
-          }
-        />
+        <Show when={props.editable} fallback={<div class="source-unavailable">无法打开此文件</div>}>
+          <div ref={lineNumberGutter} class="source-line-numbers" aria-hidden="true">
+            <For each={lineNumbers()}>{(line) => <span>{line}</span>}</For>
+          </div>
+          <div
+            ref={editor}
+            class="source-editor"
+            contentEditable
+            role="textbox"
+            aria-multiline="true"
+            spellcheck={false}
+            autocapitalize="off"
+            autocorrect="off"
+            onInput={(event) => props.onInput(event.currentTarget.textContent ?? "")}
+            onPaste={pastePlainText}
+            onScroll={(event) => {
+              if (lineNumberGutter) lineNumberGutter.scrollTop = event.currentTarget.scrollTop;
+              props.onScrollPosition({ top: event.currentTarget.scrollTop, left: 0 });
+            }}
+          />
+        </Show>
       </div>
     </article>
   );

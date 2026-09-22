@@ -1,6 +1,6 @@
 use papercompile_core::project::{
     ProjectFileError, create_project_folder, create_project_text_file, delete_project_item,
-    import_project_files, rename_project_item,
+    import_project_files, rename_project_item, scan_project,
 };
 use std::fs;
 
@@ -90,4 +90,35 @@ fn deleting_an_item_uses_the_system_trash_operation() {
     delete_project_item(root.path(), "discard-me.tex").unwrap();
 
     assert!(!item.exists());
+}
+
+#[test]
+fn scans_log_files_as_editable_text() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("main.tex"), "\\documentclass{article}").unwrap();
+    fs::write(root.path().join("build.log"), "LaTeX output\n").unwrap();
+
+    let project = scan_project(root.path()).unwrap();
+    let log = project.files.iter().find(|file| file.path == "build.log").unwrap();
+
+    assert_eq!(log.content.as_deref(), Some("LaTeX output\n"));
+}
+
+#[test]
+fn detects_text_and_binary_files_by_content_not_extension() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("main.tex"), "\\documentclass{article}").unwrap();
+    fs::write(root.path().join("notes.data"), "plain text").unwrap();
+    fs::write(root.path().join("image.data"), [0_u8, 1, 2, 3]).unwrap();
+
+    let project = scan_project(root.path()).unwrap();
+
+    assert_eq!(
+        project.files.iter().find(|file| file.path == "notes.data").unwrap().content.as_deref(),
+        Some("plain text")
+    );
+    assert_eq!(
+        project.files.iter().find(|file| file.path == "image.data").unwrap().content,
+        None
+    );
 }
