@@ -27,9 +27,11 @@ describe('project topbar', () => {
     expect(appSource).toContain('{projectRoot()}');
   });
 
-  it('fits the project control into the file pane and lets long paths scroll on hover', () => {
+  it('fits the project control into the file pane and keeps long paths ellipsized', () => {
     expect(styles).toContain('.project-file-header { display: flex;');
-    expect(styles).toContain('.project-path-display:hover { overflow-x: auto; text-overflow: clip; }');
-    expect(styles).toContain('direction: rtl;');
+    expect(styles).not.toContain('.project-path-display:hover { overflow-x: auto; text-overflow: clip; }');
+    expect(styles).not.toContain('.project-path-display::-webkit-scrollbar');
+    expect(styles).toContain('text-overflow: ellipsis;');
+    expect(styles).not.toContain('direction: rtl;');
   });
 });

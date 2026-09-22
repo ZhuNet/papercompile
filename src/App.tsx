@@ -1470,9 +1470,6 @@ function SourceView(props: {
 
   return (
     <article class="source-wrap">
-      <div class="source-header">
-        <span>{props.path || "未选择文件"}</span>
-      </div>
       <div class="source-code">
         <Show when={props.editable} fallback={<div class="source-unavailable">无法打开此文件</div>}>
           <div ref={lineNumberGutter} class="source-line-numbers" aria-hidden="true">

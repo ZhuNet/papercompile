@@ -5,12 +5,12 @@ import styles from '../styles.css?inline';
 const sourceView = appSource.slice(appSource.indexOf('function SourceView'));
 
 describe('source editor markup', () => {
-  it('uses a compact source header and an unavailable-file state', () => {
+  it('uses the full source area and an unavailable-file state', () => {
     expect(sourceView).toContain('无法打开此文件');
     expect(sourceView).toContain('when={props.editable}');
     expect(sourceView).not.toContain('二进制资源 · 只读');
-    expect(styles).toContain('height: 30px;');
-    expect(styles).toContain('height: calc(100% - 30px);');
+    expect(sourceView).not.toContain('class="source-header"');
+    expect(styles).toContain('height: 100%;');
   });
 
   it('uses one native editable text layer with a line-number gutter', () => {
