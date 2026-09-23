@@ -1066,7 +1066,10 @@ export function App() {
             <h2>项目状态</h2>
           </div>
           <div class="review-summary">
-            <strong>{dirty() ? "有未保存源码" : "源码已保存"}</strong>
+            <strong>
+              <span class={`source-status-dot ${dirty() ? "unsaved" : "saved"}`} aria-hidden="true" />
+              {dirty() ? "有未保存源码" : "源码已保存"}
+            </strong>
             <span>{projectFiles().length} 个文件</span>
           </div>
           <div class="empty-state">
