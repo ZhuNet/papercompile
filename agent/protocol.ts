@@ -15,7 +15,8 @@ export type AgentCommand =
       agentId: string;
       profile: LlmProfile;
     }
-  | { type: "prompt"; requestId: string; sessionId: string; runId: string; text: string }
+  | { type: "prompt"; requestId: string; sessionId: string; runId: string; text: string; profile: LlmProfile }
+  | { type: "select_llm"; requestId: string; sessionId: string; llmProfileId: string }
   | { type: "steer"; requestId: string; sessionId: string; runId: string; text: string }
   | { type: "abort"; requestId: string; sessionId: string; runId: string }
   | { type: "interaction_response"; requestId: string; value: unknown }
@@ -24,7 +25,7 @@ export type AgentCommand =
 
 export type AgentEvent =
   | { type: "ready"; agents: { id: string; name: string; version: string }[] }
-  | { type: "session_opened"; sessionId: string; history: unknown[] }
+  | { type: "session_opened"; sessionId: string; history: unknown[]; llmProfileId: string }
   | { type: "run_started"; sessionId: string; runId: string }
   | { type: "run_finished"; sessionId: string; runId: string; summary?: unknown }
   | { type: "run_aborted"; sessionId: string; runId: string }
@@ -80,6 +81,7 @@ export function decodeCommand(line: string): AgentCommand {
     "initialize",
     "open_session",
     "prompt",
+    "select_llm",
     "steer",
     "abort",
     "interaction_response",

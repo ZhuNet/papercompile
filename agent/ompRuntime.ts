@@ -1,6 +1,7 @@
 import path from "node:path";
 import { copyFile, access, mkdir } from "node:fs/promises";
 import type { AgentRuntime, OpenSessionOptions } from "./adapter";
+import type { LlmProfile } from "./protocol";
 import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
 
 const TASK_SUBAGENT_EVENT_CHANNEL = "task:subagent:event";
@@ -65,14 +66,14 @@ export async function createOmpRuntime(
     authStorage,
     path.join(options.agentDir, "models.yml"),
   );
-  modelRegistry.registerProvider("papercompile", {
-    baseUrl: options.profile.endpoint,
+  const registerProfile = (profile: LlmProfile) => modelRegistry.registerProvider("papercompile", {
+    baseUrl: profile.endpoint,
     api: "openai-completions",
-    apiKey: options.profile.apiKey || "papercompile-local",
-    authHeader: Boolean(options.profile.apiKey),
+    apiKey: profile.apiKey || "papercompile-local",
+    authHeader: Boolean(profile.apiKey),
     models: [{
-      id: options.profile.model,
-      name: options.profile.model,
+      id: profile.model,
+      name: profile.model,
       reasoning: false,
       input: ["text", "image"],
       supportsTools: true,
@@ -81,6 +82,7 @@ export async function createOmpRuntime(
       maxTokens: 16_384,
     }],
   });
+  registerProfile(options.profile);
   const model = modelRegistry.find("papercompile", options.profile.model);
   if (!model) throw new Error(`unable to register model ${options.profile.model}`);
 
@@ -141,7 +143,11 @@ export async function createOmpRuntime(
       }
       return () => unsubscribers.forEach(unsubscribe => unsubscribe());
     },
-    async prompt(text) {
+    async prompt(text, profile) {
+      registerProfile(profile);
+      const nextModel = modelRegistry.find("papercompile", profile.model);
+      if (!nextModel) throw new Error(`unable to register model ${profile.model}`);
+      await result.session.setModelTemporary(nextModel);
       await result.session.prompt(text, { streamingBehavior: "steer" });
     },
     async steer(text) {

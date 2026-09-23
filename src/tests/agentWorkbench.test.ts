@@ -6,7 +6,7 @@ import {
 } from '../agentWorkbench';
 
 describe('agent workbench preferences', () => {
-  it('persists named LLM profiles and project-specific selections', () => {
+  it('persists only named LLM profiles', () => {
     const storage = new Map<string, string>();
     const localStorage = {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -14,15 +14,13 @@ describe('agent workbench preferences', () => {
     };
     const preferences = {
       profiles: [{ id: 'local', provider: '本地服务', endpoint: 'http://localhost/v1', model: 'qwen', apiKey: '' }],
-      projects: { 'C:/paper': { agentId: 'omp', llmProfileId: 'local' } },
-      selectedLlmId: 'local',
     };
 
     saveAgentPreferences(preferences, localStorage);
     expect(loadAgentPreferences(localStorage)).toEqual(preferences);
   });
 
-  it('loads older preferences without a saved selection', () => {
+  it('loads profiles from older preference records without restoring selection state', () => {
     const storage = new Map<string, string>([[
       'papercompile.agent.preferences',
       JSON.stringify({
@@ -36,9 +34,10 @@ describe('agent workbench preferences', () => {
     };
 
     expect(loadAgentPreferences(localStorage)).toMatchObject({
-      selectedLlmId: 'local',
       profiles: [{ id: 'local', provider: '本地服务', model: 'qwen' }],
     });
+    expect(loadAgentPreferences(localStorage)).not.toHaveProperty('selectedLlmId');
+    expect(loadAgentPreferences(localStorage)).not.toHaveProperty('projects');
   });
 
   it('only rejects duplicate model names within the same provider', () => {

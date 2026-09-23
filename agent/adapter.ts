@@ -11,7 +11,7 @@ export type OpenSessionOptions = {
 export type AgentRuntime = {
   history: unknown[];
   subscribe(listener: (event: Record<string, unknown>) => void): () => void;
-  prompt(text: string): Promise<void>;
+  prompt(text: string, profile: LlmProfile): Promise<void>;
   steer(text: string): Promise<void>;
   abort(): Promise<void>;
   reload(): Promise<void>;
@@ -53,9 +53,9 @@ export class AgentAdapter {
     this.runId = runId;
   }
 
-  async prompt(runId: string, text: string): Promise<void> {
+  async prompt(runId: string, text: string, profile: LlmProfile): Promise<void> {
     this.startRun(runId);
-    await this.requireRuntime().prompt(text);
+    await this.requireRuntime().prompt(text, profile);
   }
 
   async steer(runId: string, text: string): Promise<void> {

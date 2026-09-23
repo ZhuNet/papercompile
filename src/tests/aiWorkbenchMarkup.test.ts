@@ -5,15 +5,33 @@ import styles from '../styles.css?inline';
 
 describe('AI workbench markup', () => {
   it('provides agent and named LLM selectors', () => {
-    expect(appSource).toContain('Agent <select disabled={aiRunning()}');
-    expect(appSource).toContain('initialAgentPreferences.selectedLlmId');
-    expect(appSource).toContain('disabled={aiRunning() || llmProfiles().length === 0}');
+    expect(appSource).toContain('class="agent-menu control-menu"');
+    expect(appSource).toContain('class="llm-menu control-menu"');
+    expect(appSource).toContain('class="control-menu-options"');
+    expect(appSource).not.toContain('Agent <select');
+    expect(appSource).toContain('initialAgentPreferences.profiles[0]?.id ?? ""');
+    expect(appSource).not.toContain('initialAgentPreferences.selectedLlmId');
+    expect(appSource).not.toContain('projectAgentPreferences');
+    expect(appSource).toContain('aria-disabled={aiRunning() || llmProfiles().length === 0}');
     expect(appSource).not.toContain('<option value="">选择 LLM 配置</option>');
     expect(appSource).toContain('<span>Provider</span>');
     expect(appSource).toContain('<span>Model</span>');
     expect(appSource).toContain('{profile.provider} · {profile.model}');
     expect(appSource).not.toContain('LLM 配置名称必须唯一');
     expect(appSource).toContain('同一 Provider 下的模型名称不能重复');
+  });
+
+  it('uses larger typography and a rounded accent menu in the AI workspace', () => {
+    expect(styles).toContain('.agent-controls {');
+    expect(styles).toContain('font-size: 12px;');
+    expect(styles).toContain('.ai-turn {');
+    expect(styles).toContain('font-size: 13px;');
+    expect(styles).toContain('.ai-composer > textarea {');
+    expect(styles).toContain('.control-menu-options {');
+    expect(styles).toContain('border-radius: 9px;');
+    expect(styles).toContain('.control-menu-option:hover');
+    expect(styles).toContain('background: #344b73;');
+    expect(styles).not.toContain('.agent-controls select');
   });
 
   it('keeps LLM creation in the settings panel and removes advanced agent controls', () => {
@@ -73,14 +91,19 @@ describe('AI workbench markup', () => {
     expect(appSource).not.toContain('.interactions.find(');
   });
 
-  it('keeps resize moves out of transcript and reactive state', () => {
+  it('preserves each AI scrollbar bottom offset while resizing', () => {
     expect(appSource).toContain('aiDock?.style.setProperty("--ai-panel-height"');
     const resizeHandler = appSource.slice(
       appSource.indexOf('const resizeAiPanel'),
       appSource.indexOf('const applyProjectFiles'),
     );
     expect(resizeHandler).not.toContain('setAiPanelHeight(clampAiPanelHeight');
-    expect(resizeHandler).not.toContain('interactionScroll.scrollTop');
+    expect(resizeHandler).toContain('const interactionBottomOffset = scrollBottomOffset(interactionScroll);');
+    expect(resizeHandler).toContain('const composerBottomOffset = scrollBottomOffset(composerInput);');
+    expect(resizeHandler).toContain('aiRunning() && followInteractionBottom');
+    expect(resizeHandler).toContain('restoreScrollBottom(interactionScroll, interactionBottomOffset);');
+    expect(resizeHandler).toContain('restoreScrollBottom(composerInput, composerBottomOffset);');
+    expect(appSource).toContain('ref={composerInput}');
   });
 
   it('stretches both interaction and composer areas to the resized dock height', () => {
@@ -90,15 +113,52 @@ describe('AI workbench markup', () => {
   });
 
   it('does not clear the timeline or replace it with history when the model changes', () => {
-    expect(appSource).toContain('if (!agentTranscript.hasContent()) agentTranscript.restore(');
+    expect(appSource).toContain('if (!agentTranscript.hasContent()) {');
     expect(appSource).toContain('createEffect(on(projectRoot, (root) => {');
     expect(appSource).not.toContain('setSelectedLlmId(llmProfileId);\n                       setAgentSessionId("");\n                       agentTranscript.clear();');
+    expect(appSource).not.toContain('projectRoot();\n    selectedLlmId();\n    if (agentReady()) void openAgentSession();');
+    expect(appSource).toContain('createEffect(on(projectRoot, () => {');
+    const selectProfile = appSource.slice(
+      appSource.indexOf('const selectLlmProfile'),
+      appSource.indexOf('let openingAgentSession'),
+    );
+    expect(selectProfile).not.toContain('setAgentSessionId');
+    expect(selectProfile).not.toContain('projectAgentPreferences');
+    expect(selectProfile).not.toContain('persistAgentPreferences');
+  });
+
+  it('keeps the latest LLM selection and otherwise falls back to the first profile', () => {
+    const projectSelection = appSource.slice(
+      appSource.indexOf('createEffect(on(projectRoot, (root) => {'),
+      appSource.indexOf('createEffect(on(projectRoot, () => {'),
+    );
+    expect(projectSelection).not.toContain('projectAgentPreferences()[root]');
+    expect(projectSelection).toContain('llmProfiles()[0]?.id ?? ""');
+  });
+
+  it('loads and updates the LLM selection through session state', () => {
+    expect(appSource).toContain('payload.llmProfileId');
+    expect(appSource).toContain('type: "select_llm"');
+    expect(appSource).toContain('sessionId: agentSessionId()');
+    expect(appSource).not.toContain('selectedLlmId: selected');
+    expect(appSource).not.toContain('projects: projectAgentPreferences()');
+  });
+
+  it('passes the selected LLM with a prompt instead of binding it to the session', () => {
+    expect(appSource).toContain('...(!wasRunning ? { profile: selectedLlm() } : {})');
+    expect(appSource).not.toContain('Agent 会话正在恢复，请稍后再试');
+  });
+
+  it('scrolls restored session history to the bottom', () => {
+    expect(appSource).toContain('agentTranscript.restore(');
+    expect(appSource).toContain('interactionScroll.scrollTop = interactionScroll.scrollHeight');
+    expect(appSource).toContain('followInteractionBottom = true;');
   });
 
   it('renders transcript nodes directly and updates them by backend id', () => {
     expect(transcriptSource).toContain("this.messages.get(id)");
     expect(transcriptSource).toContain("existing.appendData(");
-    expect(transcriptSource).toContain("existing.appendData(String(event.text ?? ''));\n      return;");
+    expect(transcriptSource).toContain("existing.appendData(String(event.text ?? ''));\n      this.afterUpdate();\n      return;");
     expect(transcriptSource).toContain("this.tools.get(String(event.toolCallId))");
     expect(transcriptSource).toContain("this.interactions.set(id, card)");
     expect(transcriptSource).toContain("content.className = 'agent-tool-content collapsed'");
@@ -113,7 +173,7 @@ describe('AI workbench markup', () => {
     expect(styles).toContain('.ai-turn.user .ai-turn-body');
     expect(styles).toContain('border: 2px solid');
     expect(styles).toContain('.ai-turn {');
-    expect(styles).toContain('font-size: 11px;');
+    expect(styles).toContain('font-size: 13px;');
   });
 
   it('delegates prompt, steering, and abort to the sidecar', () => {

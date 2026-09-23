@@ -42,4 +42,10 @@ describe('source editor markup', () => {
   it('uses one 44px topbar', () => {
     expect(styles).toContain('grid-template-rows: 44px minmax(0, 1fr) auto;');
   });
+
+  it('uses a transparent scrollbar track in the source editor', () => {
+    expect(styles).toContain('.source-editor {');
+    expect(styles).toContain('scrollbar-color: #59677a transparent;');
+    expect(styles).toContain('.source-editor::-webkit-scrollbar-track { background: transparent; }');
+  });
 });

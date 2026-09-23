@@ -14,6 +14,7 @@ describe("agent sidecar protocol", () => {
       sessionId: "session-1",
       runId: "run-1",
       text: "/review this project",
+      profile: { id: "p", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     };
 
     expect(decodeCommand(JSON.stringify(command))).toEqual(command);
@@ -30,6 +31,16 @@ describe("agent sidecar protocol", () => {
 
     expect(encodeEvent(event)).toBe(`${JSON.stringify(event)}\n`);
     expect(encodeEvent(event)).not.toContain("\nworld");
+  });
+
+  it("accepts session-scoped LLM selection commands", () => {
+    const command: AgentCommand = {
+      type: "select_llm",
+      requestId: "select-1",
+      sessionId: "session-1",
+      llmProfileId: "profile-2",
+    };
+    expect(decodeCommand(JSON.stringify(command))).toEqual(command);
   });
 
   it("rejects commands without a recognized type", () => {

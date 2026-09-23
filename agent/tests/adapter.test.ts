@@ -12,7 +12,7 @@ function fakeRuntime() {
         listener = next;
         return () => { listener = undefined; };
       },
-      async prompt(text: string) { calls.push(`prompt:${text}`); },
+       async prompt(text: string, profile: { model: string }) { calls.push(`prompt:${profile.model}:${text}`); },
       async steer(text: string) { calls.push(`steer:${text}`); },
       async abort() { calls.push("abort"); },
       async reload() { calls.push("reload"); },
@@ -32,7 +32,6 @@ describe("AgentAdapter", () => {
       projectRoot: "C:/paper",
       agentDir: "C:/data/agent",
       sessionDir: "C:/data/sessions/project/omp",
-      profile: { id: "llm", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     });
     adapter.startRun("run-1");
     runtime.emit({ type: "future_event", value: 1 });
@@ -53,17 +52,16 @@ describe("AgentAdapter", () => {
       projectRoot: "C:/paper",
       agentDir: "C:/data/agent",
       sessionDir: "C:/data/sessions/project/omp",
-      profile: { id: "llm", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" },
     });
 
-    await adapter.prompt("run-1", "work");
+    await adapter.prompt("run-1", "work", { id: "llm", provider: "Local", endpoint: "http://localhost/v1", model: "m", apiKey: "" });
     await adapter.steer("run-1", "change course");
     await adapter.abort("run-1");
     await adapter.reload();
     await adapter.dispose();
 
     expect(runtime.calls).toEqual([
-      "prompt:work",
+      "prompt:m:work",
       "steer:change course",
       "abort",
       "reload",

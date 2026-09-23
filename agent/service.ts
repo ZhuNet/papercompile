@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AgentCommand, AgentEvent } from "./protocol";
+import type { AgentCommand, AgentEvent, LlmProfile } from "./protocol";
 import type { OpenSessionOptions } from "./adapter";
 
 type Adapter = {
   id: string;
   name: string;
   openSession(options: OpenSessionOptions): Promise<{ sessionId: string; history: unknown[] }>;
-  prompt(runId: string, text: string): Promise<void>;
+  prompt(runId: string, text: string, profile: LlmProfile): Promise<void>;
   steer(runId: string, text: string): Promise<void>;
   abort(runId: string): Promise<void>;
   reload(): Promise<void>;
@@ -17,6 +18,7 @@ type Adapter = {
 export class SidecarService {
   private configRoot = "";
   private sessionId = "";
+  private sessionMetadataPath = "";
 
   constructor(
     private readonly adapter: Adapter,
@@ -52,14 +54,27 @@ export class SidecarService {
           sessionDir: path.join(this.configRoot, "sessions", projectId, "omp"),
           profile: command.profile,
         });
+        this.sessionMetadataPath = path.join(this.configRoot, "sessions", projectId, "omp", "papercompile.json");
+        let llmProfileId = "";
+        try {
+          const metadata = JSON.parse(await readFile(this.sessionMetadataPath, "utf8")) as { llmProfileId?: unknown };
+          if (typeof metadata.llmProfileId === "string") llmProfileId = metadata.llmProfileId;
+        } catch {
+          // A new session has no PaperCompile metadata yet.
+        }
         this.sessionId = opened.sessionId;
-        this.emit({ type: "session_opened", ...opened });
+        this.emit({ type: "session_opened", ...opened, llmProfileId });
         return;
       }
+      case "select_llm":
+        this.requireSession(command.sessionId);
+        await mkdir(path.dirname(this.sessionMetadataPath), { recursive: true });
+        await writeFile(this.sessionMetadataPath, JSON.stringify({ llmProfileId: command.llmProfileId }), "utf8");
+        return;
       case "prompt":
         this.requireSession(command.sessionId);
         this.emit({ type: "run_started", sessionId: this.sessionId, runId: command.runId });
-        void this.adapter.prompt(command.runId, command.text).catch(error => {
+        void this.adapter.prompt(command.runId, command.text, command.profile).catch(error => {
           this.emit({
             type: "error",
             scope: "run",

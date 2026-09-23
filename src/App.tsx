@@ -115,8 +115,7 @@ export function App() {
   const sourceScrollPositions = new SourceScrollPositions();
   const initialAgentPreferences = loadAgentPreferences();
   const [llmProfiles, setLlmProfiles] = createSignal<LlmProfile[]>(initialAgentPreferences.profiles);
-  const [projectAgentPreferences, setProjectAgentPreferences] = createSignal(initialAgentPreferences.projects);
-  const [selectedLlmId, setSelectedLlmId] = createSignal(initialAgentPreferences.selectedLlmId);
+  const [selectedLlmId, setSelectedLlmId] = createSignal(initialAgentPreferences.profiles[0]?.id ?? "");
   const [agentSessionId, setAgentSessionId] = createSignal("");
   const [activeRunId, setActiveRunId] = createSignal("");
   const [agentReady, setAgentReady] = createSignal(false);
@@ -133,6 +132,7 @@ export function App() {
   const [aiModel, setAiModel] = createSignal("");
   const [aiKey, setAiKey] = createSignal("");
   let interactionScroll: HTMLDivElement | undefined;
+  let composerInput: HTMLTextAreaElement | undefined;
   let aiDock: HTMLElement | undefined;
   let followInteractionBottom = true;
   const agentTranscript = new AgentTranscript(
@@ -174,14 +174,26 @@ export function App() {
 
   const sendAgentCommand = (command: Record<string, unknown>) =>
     invoke("send_agent_command", { command });
-  const persistAgentPreferences = (
-    profiles = llmProfiles(),
-    projects = projectAgentPreferences(),
-    selected = selectedLlmId(),
-  ) => saveAgentPreferences({ profiles, projects, selectedLlmId: selected });
+  const persistAgentPreferences = (profiles = llmProfiles()) => saveAgentPreferences({ profiles });
   const selectedLlm = createMemo(() =>
     llmProfiles().find((profile) => profile.id === selectedLlmId()),
   );
+  const selectLlmProfile = (llmProfileId: string, menu?: HTMLDetailsElement) => {
+    if (aiRunning() || llmProfileId === selectedLlmId()) {
+      menu?.removeAttribute("open");
+      return;
+    }
+    setSelectedLlmId(llmProfileId);
+    if (agentSessionId()) {
+      void sendAgentCommand({
+        type: "select_llm",
+        requestId: crypto.randomUUID(),
+        sessionId: agentSessionId(),
+        llmProfileId,
+      });
+    }
+    menu?.removeAttribute("open");
+  };
   let openingAgentSession = false;
   const openAgentSession = async () => {
     const root = projectRoot();
@@ -213,7 +225,19 @@ export function App() {
       }
       if (payload.type === "session_opened") {
         setAgentSessionId(String(payload.sessionId ?? ""));
-        if (!agentTranscript.hasContent()) agentTranscript.restore(Array.isArray(payload.history) ? payload.history : []);
+        const sessionLlmId = String(payload.llmProfileId ?? "");
+        setSelectedLlmId(
+          llmProfiles().some(profile => profile.id === sessionLlmId)
+            ? sessionLlmId
+            : llmProfiles()[0]?.id ?? "",
+        );
+        if (!agentTranscript.hasContent()) {
+          agentTranscript.restore(Array.isArray(payload.history) ? payload.history : []);
+          followInteractionBottom = true;
+          queueMicrotask(() => {
+            if (interactionScroll) interactionScroll.scrollTop = interactionScroll.scrollHeight;
+          });
+        }
         setAgentStatus("");
         return;
       }
@@ -245,34 +269,37 @@ export function App() {
 
   createEffect(on(projectRoot, (root) => {
     if (!root) return;
-    const saved = projectAgentPreferences()[root];
-    const nextId = saved?.llmProfileId && llmProfiles().some(profile => profile.id === saved.llmProfileId)
-      ? saved.llmProfileId
-      : llmProfiles().some(profile => profile.id === selectedLlmId())
-        ? selectedLlmId()
-        : llmProfiles()[0]?.id ?? "";
-    setSelectedLlmId(nextId);
+    setSelectedLlmId(llmProfiles()[0]?.id ?? "");
     setAgentSessionId("");
     setAiRunning(false);
     agentTranscript.clear();
     followInteractionBottom = true;
   }));
 
-  createEffect(() => {
-    projectRoot();
-    selectedLlmId();
+  createEffect(on(projectRoot, () => {
     if (agentReady()) void openAgentSession();
-  });
+  }));
 
   const resizeAiPanel = (event: PointerEvent) => {
     if (!aiOpen()) return;
     event.preventDefault();
     const startY = event.clientY;
     const startHeight = aiPanelHeight();
+    const scrollBottomOffset = (element?: HTMLElement) =>
+      element ? element.scrollHeight - element.clientHeight - element.scrollTop : 0;
+    const restoreScrollBottom = (element: HTMLElement | undefined, offset: number) => {
+      if (element) element.scrollTop = element.scrollHeight - element.clientHeight - offset;
+    };
+    const interactionBottomOffset = scrollBottomOffset(interactionScroll);
+    const composerBottomOffset = scrollBottomOffset(composerInput);
     let nextHeight = startHeight;
     const move = (moveEvent: PointerEvent) => {
       nextHeight = clampAiPanelHeight(startHeight + startY - moveEvent.clientY, window.innerHeight);
       aiDock?.style.setProperty("--ai-panel-height", `${nextHeight}px`);
+      if (aiRunning() && followInteractionBottom && interactionScroll) {
+        interactionScroll.scrollTop = interactionScroll.scrollHeight;
+      } else restoreScrollBottom(interactionScroll, interactionBottomOffset);
+      restoreScrollBottom(composerInput, composerBottomOffset);
     };
     const finish = () => {
       window.removeEventListener("pointermove", move);
@@ -662,11 +689,7 @@ export function App() {
       showToolbarMessage("AI 未执行：请先创建并选择 LLM 配置", "warning");
       return;
     }
-    if (!agentSessionId()) {
-      await openAgentSession();
-      showToolbarMessage("Agent 会话正在恢复，请稍后再试", "warning");
-      return;
-    }
+    if (!agentSessionId()) return;
     const text = prompt();
     const wasRunning = aiRunning();
     followInteractionBottom = true;
@@ -686,6 +709,7 @@ export function App() {
         sessionId: agentSessionId(),
         runId,
         text,
+        ...(!wasRunning ? { profile: selectedLlm() } : {}),
       });
     } catch (error) {
       setAiRunning(false);
@@ -736,16 +760,18 @@ export function App() {
     const profile = selectedLlm();
     if (!profile || !window.confirm(`确定删除 ${profile.provider} 的模型“${profile.model}”？`)) return;
     const profiles = llmProfiles().filter(item => item.id !== profile.id);
-    const projects = Object.fromEntries(Object.entries(projectAgentPreferences()).map(([root, preference]) => [
-      root,
-      preference.llmProfileId === profile.id ? { ...preference, llmProfileId: "" } : preference,
-    ]));
     setLlmProfiles(profiles);
-    setProjectAgentPreferences(projects);
     const nextId = profiles[0]?.id ?? "";
     setSelectedLlmId(nextId);
-    setAgentSessionId("");
-    persistAgentPreferences(profiles, projects, nextId);
+    if (agentSessionId()) {
+      void sendAgentCommand({
+        type: "select_llm",
+        requestId: crypto.randomUUID(),
+        sessionId: agentSessionId(),
+        llmProfileId: nextId,
+      });
+    }
+    persistAgentPreferences(profiles);
     setAiSettingsOpen(false);
   };
   const restartAgent = async () => {
@@ -780,13 +806,15 @@ export function App() {
     setLlmProfiles(profiles);
     setSelectedLlmId(profile.id);
     setCreatingLlmProfile(false);
-    setAgentSessionId("");
-    const root = projectRoot();
-    const projects = root
-      ? { ...projectAgentPreferences(), [root]: { agentId: "omp", llmProfileId: profile.id } }
-      : projectAgentPreferences();
-    setProjectAgentPreferences(projects);
-    persistAgentPreferences(profiles, projects, profile.id);
+    if (agentSessionId()) {
+      void sendAgentCommand({
+        type: "select_llm",
+        requestId: crypto.randomUUID(),
+        sessionId: agentSessionId(),
+        llmProfileId: profile.id,
+      });
+    }
+    persistAgentPreferences(profiles);
     setAiSettingsOpen(false);
     showToolbarMessage("LLM 配置已应用", "success");
   };
@@ -832,6 +860,8 @@ export function App() {
           !target.closest(".ai-settings-button")
         )
           cancelAiSettings();
+        if (!target.closest(".control-menu"))
+          document.querySelectorAll<HTMLDetailsElement>(".control-menu[open]").forEach(menu => menu.removeAttribute("open"));
       }}
     >
       <header class="topbar">
@@ -1060,26 +1090,41 @@ export function App() {
         <div class="ai-body" aria-hidden={!aiOpen()}>
             <div class="ai-interaction">
               <div class="agent-controls">
-                <label>Agent <select disabled={aiRunning()}><option value="omp">Oh My Pi</option></select></label>
-                <label>LLM
-                  <select
-                    value={selectedLlmId()}
-                    disabled={aiRunning() || llmProfiles().length === 0}
-                    onChange={(event) => {
-                      const llmProfileId = event.currentTarget.value;
-                      setSelectedLlmId(llmProfileId);
-                      setAgentSessionId("");
-                      const root = projectRoot();
-                      const projects = root
-                        ? { ...projectAgentPreferences(), [root]: { agentId: "omp", llmProfileId } }
-                        : projectAgentPreferences();
-                      setProjectAgentPreferences(projects);
-                      persistAgentPreferences(llmProfiles(), projects, llmProfileId);
-                    }}
-                  >
-                    <For each={llmProfiles()}>{profile => <option value={profile.id}>{profile.provider} · {profile.model}</option>}</For>
-                  </select>
-                </label>
+                 <div class="control-field">
+                   <span>Agent</span>
+                   <details class="agent-menu control-menu">
+                     <summary onClick={(event) => aiRunning() && event.preventDefault()}>Oh My Pi</summary>
+                     <div class="control-menu-options">
+                       <button
+                         class="control-menu-option selected"
+                         type="button"
+                         onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}
+                       >Oh My Pi</button>
+                     </div>
+                   </details>
+                 </div>
+                 <div class="control-field">
+                   <span>LLM</span>
+                   <details
+                     class="llm-menu control-menu"
+                     aria-disabled={aiRunning() || llmProfiles().length === 0}
+                   >
+                     <summary onClick={(event) => (aiRunning() || llmProfiles().length === 0) && event.preventDefault()}>
+                       {selectedLlm() ? `${selectedLlm()!.provider} · ${selectedLlm()!.model}` : "暂无配置"}
+                     </summary>
+                     <div class="control-menu-options">
+                       <For each={llmProfiles()}>{profile => (
+                         <button
+                           type="button"
+                           class={`control-menu-option ${profile.id === selectedLlmId() ? "selected" : ""}`}
+                           onClick={(event) => selectLlmProfile(profile.id, event.currentTarget.closest("details") ?? undefined)}
+                         >
+                           {profile.provider} · {profile.model}
+                         </button>
+                       )}</For>
+                     </div>
+                   </details>
+                 </div>
                 <span>{agentStatus()}</span>
                 <Show when={!agentReady()}><button onClick={() => void restartAgent()}>重启</button></Show>
               </div>
@@ -1136,6 +1181,7 @@ export function App() {
                 </div>
               </Show>
               <textarea
+                ref={composerInput}
                 value={prompt()}
                 onInput={(event) => setPrompt(event.currentTarget.value)}
                 onKeyDown={(event) => {

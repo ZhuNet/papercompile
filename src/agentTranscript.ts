@@ -64,6 +64,7 @@ export class AgentTranscript {
         return;
       }
       existing.appendData(String(event.text ?? ''));
+      this.afterUpdate();
       return;
     }
     if (event.type === 'tool_started') {
