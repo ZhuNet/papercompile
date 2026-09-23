@@ -12,13 +12,17 @@ export function rejectFileChange(revision: FileRevision): string {
 export function sourceChanges(
   current: SourceFile[],
   next: SourceFile[],
+  previousDisk: SourceFile[],
 ): FileRevision[] {
   const currentByPath = new Map(current.map((file) => [file.path, file.content]));
+  const previousDiskByPath = new Map(previousDisk.map((file) => [file.path, file.content]));
   return next.flatMap((file) => {
     const before = currentByPath.get(file.path);
+    const previous = previousDiskByPath.get(file.path);
     return typeof before === 'string'
       && typeof file.content === 'string'
-      && before !== file.content
+      && typeof previous === 'string'
+      && previous !== file.content
       ? [{ path: file.path, before, after: file.content }]
       : [];
   });
@@ -48,14 +52,18 @@ export function sourceWorkingFiles<T extends SourceFile>(scanned: T[], working: 
 export function sourceBaseline<T extends SourceFile>(
   scanned: T[],
   saved: SourceFile[],
-  changes: FileRevision[],
+  working: SourceFile[],
 ): T[] {
   const savedContent = new Map(saved.map((file) => [file.path, file.content]));
-  const changedPaths = new Set(changes.map((change) => change.path));
+  const workingContent = new Map(working.map((file) => [file.path, file.content]));
   return scanned.map((file) =>
-    changedPaths.has(file.path) && savedContent.has(file.path)
-      ? { ...file, content: savedContent.get(file.path) }
-      : file,
+    typeof file.content !== 'string'
+      ? file
+      : typeof savedContent.get(file.path) === 'string'
+        ? { ...file, content: savedContent.get(file.path) }
+        : typeof workingContent.get(file.path) === 'string'
+          ? { ...file, content: workingContent.get(file.path) }
+          : file,
   );
 }
 
@@ -64,12 +72,13 @@ export function synchronizeSourceFiles<T extends SourceFile>(
   working: SourceFile[],
   saved: SourceFile[],
   history: FileRevision[],
+  previousDisk: SourceFile[],
 ): { files: T[]; saved: T[]; history: FileRevision[] } {
-  const changes = sourceChanges(working, scanned);
+  const changes = sourceChanges(working, scanned, previousDisk);
   const state = applySourceChanges(sourceWorkingFiles(scanned, working), history, changes);
   return {
     files: state.files,
-    saved: sourceBaseline(scanned, saved, changes),
+    saved: sourceBaseline(scanned, saved, state.files),
     history: state.history,
   };
 }

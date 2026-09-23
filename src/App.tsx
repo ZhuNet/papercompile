@@ -330,15 +330,16 @@ export function App() {
       const rename = renames.find((item) => item.from === file.path);
       return rename ? { ...file, path: rename.to } : file;
     });
-    const renamedSaved = savedFiles().map((file) => {
+    const previousProjectFiles = projectFiles().map((file) => {
       const rename = renames.find((item) => item.from === file.path);
       return rename ? { ...file, path: rename.to } : file;
     });
     const state = synchronizeSourceFiles(
       project.files,
       renamedWorking,
-      renamedSaved,
+      savedFiles(),
       undoStack(),
+      previousProjectFiles,
     );
     setProjectFiles(project.files);
     setProjectFolders(project.folders ?? []);
@@ -457,7 +458,8 @@ export function App() {
         return false;
       }
     }
-    await refreshProjectFiles();
+    const project = await refreshProjectFiles();
+    setSavedFiles(project.files);
     showToolbarMessage("项目源码已保存", "success");
     return true;
   };

@@ -35,7 +35,7 @@ describe('source change maintenance', () => {
     const current = [{ path: 'main.tex', content: 'before' }];
     const scanned = [{ path: 'main.tex', content: 'after' }];
 
-    expect(sourceChanges(current, scanned)).toEqual([
+    expect(sourceChanges(current, scanned, current)).toEqual([
       { path: 'main.tex', before: 'before', after: 'after' },
     ]);
   });
@@ -57,19 +57,32 @@ describe('source change maintenance', () => {
       { path: 'figure.png', content: null },
     ];
 
-    expect(sourceChanges(current, current)).toEqual([]);
+    expect(sourceChanges(current, current, current)).toEqual([]);
   });
 
   it('advances an existing memory edit to the latest scanned disk content', () => {
     const memory = [{ path: 'main.tex', content: 'memory edit' }];
     const scanned = [{ path: 'main.tex', content: 'saved content' }];
 
-    const state = synchronizeSourceFiles(scanned, memory, memory, []);
+    const state = synchronizeSourceFiles(scanned, memory, memory, [], [
+      { path: 'main.tex', content: 'before memory edit' },
+    ]);
 
     expect(state.files).toEqual(scanned);
     expect(state.history).toEqual([
       { path: 'main.tex', before: 'memory edit', after: 'saved content' },
     ]);
+  });
+
+  it('keeps an unsaved memory edit when the disk text did not change', () => {
+    const memory = [{ path: 'main.tex', content: 'memory edit' }];
+    const previousDisk = [{ path: 'main.tex', content: 'saved content' }];
+    const scanned = [{ path: 'main.tex', content: 'saved content' }];
+
+    const state = synchronizeSourceFiles(scanned, memory, memory, [], previousDisk);
+
+    expect(state.files).toEqual(memory);
+    expect(state.history).toEqual([]);
   });
 
   it('refreshes disk metadata without replacing the maintained memory source', () => {
@@ -81,13 +94,36 @@ describe('source change maintenance', () => {
     ]);
   });
 
-  it('keeps saved content as the dirty baseline while accepting scanned file metadata', () => {
+  it('keeps each existing text baseline when unrelated files are scanned', () => {
     const saved = [{ path: 'main.tex', content: 'before', content_hash: 'old-hash', size: 6 }];
     const scanned = [{ path: 'main.tex', content: 'after', content_hash: 'new-hash', size: 5 }];
-    const changes = [{ path: 'main.tex', before: 'before', after: 'after' }];
 
-    expect(sourceBaseline(scanned, saved, changes)).toEqual([
+    expect(sourceBaseline(scanned, saved, scanned)).toEqual([
       { path: 'main.tex', content: 'before', content_hash: 'new-hash', size: 5 },
+    ]);
+  });
+
+  it('updates only text baselines whose paths can no longer be matched', () => {
+    const saved = [
+      { path: 'main.tex', content: 'main baseline', content_hash: 'main-hash' },
+      { path: 'old.tex', content: 'old baseline', content_hash: 'old-hash' },
+    ];
+    const scanned = [
+      { path: 'main.tex', content: 'main disk', content_hash: 'main-new-hash' },
+      { path: 'renamed.tex', content: 'renamed disk', content_hash: 'renamed-hash' },
+      { path: 'figure.png', content: null, content_hash: null },
+    ];
+
+    const working = [
+      { path: 'main.tex', content: 'main working', content_hash: 'main-new-hash' },
+      { path: 'renamed.tex', content: 'renamed working', content_hash: 'renamed-hash' },
+      { path: 'figure.png', content: null, content_hash: null },
+    ];
+
+    expect(sourceBaseline(scanned, saved, working)).toEqual([
+      { path: 'main.tex', content: 'main baseline', content_hash: 'main-new-hash' },
+      { path: 'renamed.tex', content: 'renamed working', content_hash: 'renamed-hash' },
+      { path: 'figure.png', content: null, content_hash: null },
     ]);
   });
 });
