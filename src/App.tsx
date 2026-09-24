@@ -1190,8 +1190,15 @@ export function App() {
                 value={prompt()}
                 onInput={(event) => setPrompt(event.currentTarget.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey))
-                    toggleAiRun();
+                  if (event.key === "Escape" && aiRunning()) {
+                    event.preventDefault();
+                    void stopAi();
+                    return;
+                  }
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    void runAi();
+                  }
                 }}
                 placeholder={aiRunning() ? "输入引导消息..." : "输入项目操作或源码修改要求..."}
               />

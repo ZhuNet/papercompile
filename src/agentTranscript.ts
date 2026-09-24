@@ -11,11 +11,18 @@ type ToolNodes = {
   manuallyToggled: boolean;
 };
 
+type RestoreEntry =
+  | { kind: 'message'; id: string; role: MessageRole; text: string }
+  | { kind: 'tool'; id: string; name: string; input: unknown; isError?: boolean; result?: unknown };
+
+const maxTranscriptNodes = 200;
+
 export class AgentTranscript {
   private root?: HTMLElement;
   private messages = new Map<string, Text>();
   private tools = new Map<string, ToolNodes>();
   private interactions = new Map<string, HTMLElement>();
+  private cleanupByNode = new Map<HTMLElement, () => void>();
 
   constructor(
     private respond: InteractionResponder,
@@ -35,6 +42,7 @@ export class AgentTranscript {
     this.messages.clear();
     this.tools.clear();
     this.interactions.clear();
+    this.cleanupByNode.clear();
   }
 
   appendUser(id: string, role: MessageRole, text: string): void {
@@ -50,8 +58,12 @@ export class AgentTranscript {
     paragraph.append(textNode);
     body.append(paragraph);
     turn.append(label, body);
+    this.makeRoom();
     this.root.append(turn);
     this.messages.set(id, textNode);
+    this.trackNode(turn, () => {
+      if (this.messages.get(id) === textNode) this.messages.delete(id);
+    });
     this.afterUpdate();
   }
 
@@ -94,7 +106,8 @@ export class AgentTranscript {
 
   restore(history: unknown[]): void {
     this.clear();
-    const tools = new Map<string, { name: string; input: unknown }>();
+    const entries: RestoreEntry[] = [];
+    const tools = new Map<string, Extract<RestoreEntry, { kind: 'tool' }>>();
     history.forEach((value, index) => {
       if (!value || typeof value !== 'object') return;
       const message = value as Record<string, unknown>;
@@ -108,15 +121,21 @@ export class AgentTranscript {
               ? [String(part.text)]
               : [],
         ).join('');
-        if (text) this.appendUser(`history-${index}`, role, text);
+        if (text) entries.push({ kind: 'message', id: `history-${index}`, role, text });
         if (role === 'assistant') {
           content.forEach(part => {
             if (!part || typeof part !== 'object') return;
             const block = part as Record<string, unknown>;
             if (block.type !== 'toolCall' || !block.id || !block.name) return;
             const id = String(block.id);
-            tools.set(id, { name: String(block.name), input: block.arguments });
-            this.appendTool(id, String(block.name), block.arguments);
+            const entry: Extract<RestoreEntry, { kind: 'tool' }> = {
+              kind: 'tool',
+              id,
+              name: String(block.name),
+              input: block.arguments,
+            };
+            tools.set(id, entry);
+            entries.push(entry);
           });
         }
         return;
@@ -124,18 +143,33 @@ export class AgentTranscript {
       if (role !== 'toolResult') return;
       const id = String(message.toolCallId ?? '');
       if (!tools.has(id)) return;
-      const tool = this.tools.get(id);
+      const tool = tools.get(id);
       if (tool) {
-        const failed = message.isError === true;
-        tool.section.className = `agent-tool-card ${failed ? 'failed' : 'completed'}`;
-        tool.status.textContent = failed ? '!' : '✓';
+        tool.isError = message.isError === true;
+        tool.result = message.details ?? message.content;
       }
-      this.updateTool(id, '结果', message.details ?? message.content);
+    });
+    entries.slice(-maxTranscriptNodes).forEach(entry => {
+      if (entry.kind === 'message') {
+        this.appendUser(entry.id, entry.role, entry.text);
+        return;
+      }
+      this.appendTool(entry.id, entry.name, entry.input);
+      const tool = this.tools.get(entry.id);
+      if (tool && entry.isError !== undefined) {
+        tool.section.className = `agent-tool-card ${entry.isError ? 'failed' : 'completed'}`;
+        tool.status.textContent = entry.isError ? '!' : '✓';
+      }
+      if (entry.result !== undefined) this.updateTool(entry.id, '结果', entry.result);
     });
   }
 
   removeInteraction(id: string): void {
-    this.interactions.get(id)?.remove();
+    const card = this.interactions.get(id);
+    if (card) {
+      this.cleanupByNode.delete(card);
+      card.remove();
+    }
     this.interactions.delete(id);
   }
 
@@ -162,8 +196,12 @@ export class AgentTranscript {
     });
     heading.append(status, title, toggle);
     section.append(heading, content);
+    this.makeRoom();
     this.root.append(section);
     this.tools.set(id, nodes);
+    this.trackNode(section, () => {
+      if (this.tools.get(id) === nodes) this.tools.delete(id);
+    });
     this.appendToolValue(content, '输入', input);
     this.afterUpdate();
   }
@@ -234,8 +272,25 @@ export class AgentTranscript {
       });
       card.append(actions);
     }
+    this.makeRoom();
     this.root.append(card);
     this.interactions.set(id, card);
+    this.trackNode(card, () => {
+      if (this.interactions.get(id) === card) this.interactions.delete(id);
+    });
     this.afterUpdate();
+  }
+
+  private trackNode(node: HTMLElement, cleanup: () => void): void {
+    this.cleanupByNode.set(node, cleanup);
+  }
+
+  private makeRoom(): void {
+    if (!this.root || this.root.childElementCount < maxTranscriptNodes) return;
+    const oldest = this.root.firstElementChild as HTMLElement | null;
+    if (!oldest) return;
+    this.cleanupByNode.get(oldest)?.();
+    this.cleanupByNode.delete(oldest);
+    oldest.remove();
   }
 }

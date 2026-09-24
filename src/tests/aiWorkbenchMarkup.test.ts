@@ -149,6 +149,23 @@ describe('AI workbench markup', () => {
     expect(appSource).not.toContain('Agent 会话正在恢复，请稍后再试');
   });
 
+  it('sends steering text from the composer while the agent is running', () => {
+    const composer = appSource.slice(
+      appSource.indexOf('<textarea'),
+      appSource.indexOf('</textarea>'),
+    );
+    expect(composer).toContain('void runAi();');
+  });
+
+  it('stops a running agent with Escape from the composer', () => {
+    const composer = appSource.slice(
+      appSource.indexOf('<textarea'),
+      appSource.indexOf('</textarea>'),
+    );
+    expect(composer).toContain('event.key === "Escape" && aiRunning()');
+    expect(composer).toContain('void stopAi();');
+  });
+
   it('scrolls restored session history to the bottom', () => {
     expect(appSource).toContain('agentTranscript.restore(');
     expect(appSource).toContain('interactionScroll.scrollTop = interactionScroll.scrollHeight');
