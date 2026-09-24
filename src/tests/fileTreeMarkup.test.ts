@@ -27,8 +27,26 @@ describe('file tree creation markup', () => {
     expect(appSource).not.toContain('selectionRevision');
     expect(appSource).toContain('const pendingTreeSelection = target.closest(".tree-item")');
     expect(appSource).toContain('item.dataset.treePath');
-    expect(appSource).toContain('await refreshProjectFiles();');
-    expect(appSource).toContain('await refreshProjectFiles([{ from, to }]);');
+    expect(appSource).toContain('project-changed');
+    expect(appSource).not.toContain('await refreshProjectFiles();');
+    expect(appSource).not.toContain('await refreshProjectFiles([{ from, to }]);');
+  });
+
+  it('lets the disk watcher refresh after frontend file operations', () => {
+    expect(appSource).not.toContain('const refreshProjectFiles = async');
+    expect(appSource).not.toContain('const project = await refreshProjectFiles();');
+    expect(appSource).not.toContain('await refreshProjectFiles();');
+    expect(appSource).not.toContain('await refreshProjectFiles([{ from, to }]);');
+    expect(appSource.match(/invoke<ProjectResponse>\("scan_project"/g)).toHaveLength(1);
+    expect(appSource).toContain('listen<string>("project-changed"');
+  });
+
+  it('updates the saved baseline immediately after each successful disk write', () => {
+    expect(appSource).not.toContain('pendingSaves');
+    expect(appSource).toContain('setSavedFiles((files) =>');
+    expect(appSource).toContain('await invoke<string>("save_source"');
+    expect(appSource).toContain('setSavedFiles((files) => files.map');
+    expect(appSource).toContain('content_hash: contentHash');
   });
 
   it('continues selecting the clicked tree item after committing creation', () => {

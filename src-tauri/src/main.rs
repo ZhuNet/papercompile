@@ -157,7 +157,7 @@ fn save_source_command(
     path: String,
     expected_hash: String,
     content: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     papercompile_core::source::save_source(
         std::path::Path::new(&root),
         &path,

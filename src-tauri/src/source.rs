@@ -45,7 +45,7 @@ pub fn save_source(
     relative: &str,
     expected_hash: &str,
     content: &str,
-) -> Result<(), SourceEditError> {
+) -> Result<String, SourceEditError> {
     let relative_path = Path::new(relative);
     if relative_path.is_absolute()
         || relative_path
@@ -61,5 +61,6 @@ pub fn save_source(
     }
     let temp = path.with_extension("papercompile.save.tmp");
     fs::write(&temp, content).map_err(|_| SourceEditError::Unreadable)?;
-    fs::rename(temp, path).map_err(|_| SourceEditError::Unreadable)
+    fs::rename(temp, path).map_err(|_| SourceEditError::Unreadable)?;
+    Ok(FileSnapshot::new(relative, content.to_string()).content_hash)
 }

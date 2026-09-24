@@ -107,6 +107,7 @@ export function App() {
   const [creationKind, setCreationKind] = createSignal<"file" | "folder">();
   const [creationFolder, setCreationFolder] = createSignal("");
   const [lastProjectSignature, setLastProjectSignature] = createSignal("");
+  const pendingRenames: { from: string; to: string }[] = [];
   const [projectName, setProjectName] = createSignal("尚未打开项目");
   const [sourceDraft, setSourceDraft] = createSignal("");
   const [savedFiles, setSavedFiles] = createSignal<ProjectFile[]>([]);
@@ -322,24 +323,25 @@ export function App() {
     );
   };
 
+  const renamePath = (path: string, renames: { from: string; to: string }[]) =>
+    renames.reduce((currentPath, rename) =>
+      currentPath === rename.from || currentPath.startsWith(`${rename.from}/`)
+        ? `${rename.to}${currentPath.slice(rename.from.length)}`
+        : currentPath,
+    path);
+
   const syncProjectFiles = (
     project: ProjectResponse,
     renames: { from: string; to: string }[] = [],
   ) => {
-    const renamedWorking = workingFiles().map((file) => {
-      const rename = renames.find((item) => item.from === file.path);
-      return rename ? { ...file, path: rename.to } : file;
-    });
-    const previousProjectFiles = projectFiles().map((file) => {
-      const rename = renames.find((item) => item.from === file.path);
-      return rename ? { ...file, path: rename.to } : file;
-    });
+    const renameFiles = <T extends { path: string },>(files: T[]) =>
+      files.map((file) => ({ ...file, path: renamePath(file.path, renames) }));
     const state = synchronizeSourceFiles(
       project.files,
-      renamedWorking,
-      savedFiles(),
+      renameFiles(workingFiles()),
+      renameFiles(savedFiles()),
       undoStack(),
-      previousProjectFiles,
+      renameFiles(projectFiles()),
     );
     setProjectFiles(project.files);
     setProjectFolders(project.folders ?? []);
@@ -367,6 +369,7 @@ export function App() {
     const project = await invoke<ProjectResponse>("open_project", {
       path: root,
     });
+    pendingRenames.length = 0;
     applyProjectFiles(project);
     setProjectName(projectLocation(project.root).name);
     setProjectRoot(project.root);
@@ -390,33 +393,31 @@ export function App() {
     if (!root) return;
     void invoke("watch_project", { root });
     let syncing = false;
+    let changePending = false;
     void listen<string>("project-changed", async (event) => {
-      if (event.payload !== root || syncing) return;
+      if (event.payload !== root) return;
+      changePending = true;
+      if (syncing) return;
       syncing = true;
       try {
-        const project = await invoke<ProjectResponse>("scan_project", {
-          path: root,
-        });
-        const signature = `${project.entry}|${project.folders.join("|")}|${project.files.map((file) => `${file.path}:${file.size}:${file.content_hash ?? ""}`).join("|")}`;
-        if (signature !== lastProjectSignature()) {
-          setLastProjectSignature(signature);
-          syncProjectFiles(project);
+        while (changePending) {
+          changePending = false;
+          const project = await invoke<ProjectResponse>("scan_project", {
+            path: root,
+          });
+          const signature = `${project.entry}|${project.folders.join("|")}|${project.files.map((file) => `${file.path}:${file.size}:${file.content_hash ?? ""}`).join("|")}`;
+          const diskChanged = signature !== lastProjectSignature();
+          const renames = diskChanged ? pendingRenames.splice(0) : [];
+          if (diskChanged) {
+            setLastProjectSignature(signature);
+            syncProjectFiles(project, renames);
+          }
         }
       } finally {
         syncing = false;
       }
     }).then((unlisten) => onCleanup(unlisten));
   });
-
-  const refreshProjectFiles = async (
-    renames: { from: string; to: string }[] = [],
-  ) => {
-    const project = await invoke<ProjectResponse>("scan_project", {
-      path: projectRoot(),
-    });
-    syncProjectFiles(project, renames);
-    return project;
-  };
 
   const editTex = (path: string, value: string) => {
     const before =
@@ -447,19 +448,22 @@ export function App() {
     if (!projectRoot()) return false;
     for (const file of savableSourceFiles(workingFiles(), savedFiles())) {
       try {
-        await invoke("save_source", {
+        const contentHash = await invoke<string>("save_source", {
           root: projectRoot(),
           path: file.path,
           expectedHash: file.expectedHash,
           content: file.content,
         });
+        setSavedFiles((files) => files.map((saved) =>
+          saved.path === file.path
+            ? { ...saved, content: file.content, content_hash: contentHash }
+            : saved,
+        ));
       } catch (error) {
         showToolbarMessage(`无法保存 ${file.path}：${operationErrorReason("save", error)}`, "error");
         return false;
       }
     }
-    const project = await refreshProjectFiles();
-    setSavedFiles(project.files);
     showToolbarMessage("项目源码已保存", "success");
     return true;
   };
@@ -540,21 +544,25 @@ export function App() {
       path,
       content,
     });
-    await refreshProjectFiles();
   };
   const addFolder = async (
     path: string,
   ) => {
     await invoke("create_project_folder", { root: projectRoot(), path });
-    await refreshProjectFiles();
   };
   const renameOrMove = async (from: string, to: string) => {
-    await invoke("rename_project_item", { root: projectRoot(), from, to });
-    await refreshProjectFiles([{ from, to }]);
+    const rename = { from, to };
+    pendingRenames.push(rename);
+    try {
+      await invoke("rename_project_item", { root: projectRoot(), from, to });
+    } catch (error) {
+      const index = pendingRenames.indexOf(rename);
+      if (index !== -1) pendingRenames.splice(index, 1);
+      throw error;
+    }
   };
   const trashItem = async (path: string) => {
     await invoke("delete_project_item", { root: projectRoot(), path });
-    await refreshProjectFiles();
   };
   const userFileOperation = async (
     operation: () => Promise<void>,
@@ -677,7 +685,6 @@ export function App() {
         folder,
         sources,
       });
-      await refreshProjectFiles();
     }, "upload", `已上传 ${sources.length} 个文件到 ${folder || "项目根目录"}`, "无法上传文件");
   };
 
