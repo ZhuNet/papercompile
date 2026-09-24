@@ -40,6 +40,14 @@ describe('source change maintenance', () => {
     ]);
   });
 
+  it('does not record a watcher change when saved disk content already matches working memory', () => {
+    const working = [{ path: 'main.tex', content: 'saved content' }];
+    const previousDisk = [{ path: 'main.tex', content: 'old content' }];
+    const scanned = [{ path: 'main.tex', content: 'saved content' }];
+
+    expect(sourceChanges(working, scanned, previousDisk)).toEqual([]);
+  });
+
   it('applies source changes to memory and appends them to undo history', () => {
     const state = applySourceChanges(
       [{ path: 'main.tex', content: 'before' }],

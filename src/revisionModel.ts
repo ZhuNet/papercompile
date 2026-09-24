@@ -23,6 +23,7 @@ export function sourceChanges(
       && typeof file.content === 'string'
       && typeof previous === 'string'
       && previous !== file.content
+      && before !== file.content
       ? [{ path: file.path, before, after: file.content }]
       : [];
   });

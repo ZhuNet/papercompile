@@ -46,6 +46,7 @@ import {
   type LlmProfile,
 } from "./agentWorkbench";
 import { AgentTranscript } from "./agentTranscript";
+import { createOperationQueue } from "./operationQueue";
 type ProjectFile = {
   path: string;
   content?: string | null;
@@ -113,6 +114,7 @@ export function App() {
   const [savedFiles, setSavedFiles] = createSignal<ProjectFile[]>([]);
   const [workingFiles, setWorkingFiles] = createSignal<ProjectFile[]>([]);
   const [undoStack, setUndoStack] = createSignal<HistoryEntry[]>([]);
+  const enqueueFileOperation = createOperationQueue();
   const sourceScrollPositions = new SourceScrollPositions();
   const initialAgentPreferences = loadAgentPreferences();
   const [llmProfiles, setLlmProfiles] = createSignal<LlmProfile[]>(initialAgentPreferences.profiles);
@@ -392,34 +394,24 @@ export function App() {
     const root = projectRoot();
     if (!root) return;
     void invoke("watch_project", { root });
-    let syncing = false;
-    let changePending = false;
-    void listen<string>("project-changed", async (event) => {
+    void listen<string>("project-changed", (event) => {
       if (event.payload !== root) return;
-      changePending = true;
-      if (syncing) return;
-      syncing = true;
-      try {
-        while (changePending) {
-          changePending = false;
-          const project = await invoke<ProjectResponse>("scan_project", {
-            path: root,
-          });
-          const signature = `${project.entry}|${project.folders.join("|")}|${project.files.map((file) => `${file.path}:${file.size}:${file.content_hash ?? ""}`).join("|")}`;
-          const diskChanged = signature !== lastProjectSignature();
-          const renames = diskChanged ? pendingRenames.splice(0) : [];
-          if (diskChanged) {
-            setLastProjectSignature(signature);
-            syncProjectFiles(project, renames);
-          }
+      void enqueueFileOperation(async () => {
+        const project = await invoke<ProjectResponse>("scan_project", {
+          path: root,
+        });
+        const signature = `${project.entry}|${project.folders.join("|")}|${project.files.map((file) => `${file.path}:${file.size}:${file.content_hash ?? ""}`).join("|")}`;
+        const diskChanged = signature !== lastProjectSignature();
+        const renames = diskChanged ? pendingRenames.splice(0) : [];
+        if (diskChanged) {
+          setLastProjectSignature(signature);
+          syncProjectFiles(project, renames);
         }
-      } finally {
-        syncing = false;
-      }
+      });
     }).then((unlisten) => onCleanup(unlisten));
   });
 
-  const editTex = (path: string, value: string) => {
+  const editTex = (path: string, value: string) => void enqueueFileOperation(() => {
     const before =
       workingFiles().find((file) => file.path === path)?.content ?? "";
     if (before === value) return;
@@ -428,10 +420,10 @@ export function App() {
     const state = applySourceChanges(workingFiles(), undoStack(), [change]);
     setWorkingFiles(state.files);
     setUndoStack(state.history);
-  };
+  });
   const updateSource = (value: string) => editTex(selectedFile(), value);
 
-  const undo = () => {
+  const undo = () => void enqueueFileOperation(() => {
     const items = undoStack();
     const action = items[items.length - 1];
     if (!action) return;
@@ -442,9 +434,9 @@ export function App() {
       ),
     );
     if (action.path === selectedFile()) setSourceDraft(action.before);
-  };
+  });
 
-  const saveProject = async (): Promise<boolean> => {
+  const saveProject = (): Promise<boolean> => enqueueFileOperation(async () => {
     if (!projectRoot()) return false;
     for (const file of savableSourceFiles(workingFiles(), savedFiles())) {
       try {
@@ -466,7 +458,7 @@ export function App() {
     }
     showToolbarMessage("项目源码已保存", "success");
     return true;
-  };
+  });
 
   const openProject = async () => {
     if (aiRunning()) {
