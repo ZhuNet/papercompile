@@ -75,7 +75,12 @@ export function synchronizeSourceFiles<T extends SourceFile>(
   previousDisk: SourceFile[],
 ): { files: T[]; saved: T[]; history: FileRevision[] } {
   const changes = sourceChanges(working, scanned, previousDisk);
-  const state = applySourceChanges(sourceWorkingFiles(scanned, working), history, changes);
+  const savedPaths = new Set(saved.map((file) => file.path));
+  const state = applySourceChanges(
+    sourceWorkingFiles(scanned, working),
+    history.filter((change) => savedPaths.has(change.path)),
+    changes,
+  );
   return {
     files: state.files,
     saved: sourceBaseline(scanned, saved, state.files),

@@ -85,6 +85,24 @@ describe('source change maintenance', () => {
     expect(state.history).toEqual([]);
   });
 
+  it('uses saved file paths to remove stale undo history', () => {
+    const working = [{ path: 'main.tex', content: 'main' }];
+    const scanned = [
+      { path: 'main.tex', content: 'main' },
+      { path: 'deleted.tex', content: 'deleted' },
+    ];
+    const history = [
+      { path: 'main.tex', before: 'before main', after: 'main' },
+      { path: 'deleted.tex', before: 'before deleted', after: 'deleted' },
+    ];
+
+    const state = synchronizeSourceFiles(scanned, working, working, history, [
+      { path: 'main.tex', content: 'main' },
+    ]);
+
+    expect(state.history).toEqual([history[0]]);
+  });
+
   it('refreshes disk metadata without replacing the maintained memory source', () => {
     const memory = [{ path: 'main.tex', content: 'memory edit', content_hash: 'old-hash' }];
     const scanned = [{ path: 'main.tex', content: 'disk content', content_hash: 'new-hash' }];
