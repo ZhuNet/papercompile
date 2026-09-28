@@ -1,7 +1,7 @@
 use papercompile_core::compiler::{
     CompileError, CompilerKind, compile_project_with, compiler_arguments, compiler_output_path,
     compiler_passes, enable_pdf_bookmarks, pdf_outline_items, prepare_compile_workspace,
-    select_compiler,
+    select_compiler, snapshot_compile_workspace, synchronize_compile_outputs,
 };
 use papercompile_core::project::SourceFile;
 use std::fs;
@@ -198,4 +198,47 @@ fn rejects_unsafe_source_override_paths() {
     );
 
     assert!(matches!(result, Err(CompileError::UnsafeEntry)));
+}
+
+#[test]
+fn synchronizes_compiler_file_changes_by_content_hash_except_the_preview_pdf() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("build")).unwrap();
+    fs::create_dir(workspace.path().join("build")).unwrap();
+    fs::write(root.path().join("build/main.aux"), b"old aux").unwrap();
+    fs::write(root.path().join("removed.out"), b"remove me").unwrap();
+    fs::write(root.path().join("unchanged.bin"), [0_u8, 1, 2]).unwrap();
+    fs::write(workspace.path().join("build/main.aux"), b"old aux").unwrap();
+    fs::write(workspace.path().join("removed.out"), b"remove me").unwrap();
+    fs::write(workspace.path().join("unchanged.bin"), [0_u8, 1, 2]).unwrap();
+
+    let before = snapshot_compile_workspace(workspace.path()).unwrap();
+    fs::write(workspace.path().join("build/main.aux"), b"new aux").unwrap();
+    fs::remove_file(workspace.path().join("removed.out")).unwrap();
+    fs::write(workspace.path().join("created.bin"), [3_u8, 4, 5]).unwrap();
+    fs::write(workspace.path().join("main.pdf"), b"preview only").unwrap();
+
+    synchronize_compile_outputs(
+        root.path(),
+        workspace.path(),
+        &before,
+        std::path::Path::new("main.pdf"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read(root.path().join("build/main.aux")).unwrap(),
+        b"new aux"
+    );
+    assert!(!root.path().join("removed.out").exists());
+    assert_eq!(
+        fs::read(root.path().join("created.bin")).unwrap(),
+        [3_u8, 4, 5]
+    );
+    assert_eq!(
+        fs::read(root.path().join("unchanged.bin")).unwrap(),
+        [0_u8, 1, 2]
+    );
+    assert!(!root.path().join("main.pdf").exists());
 }

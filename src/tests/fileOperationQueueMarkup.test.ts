@@ -14,4 +14,8 @@ describe('file operation serialization', () => {
     expect(appSource).toContain('const undo = () => void enqueueFileOperation(() =>');
     expect(appSource).toContain('const saveProject = (): Promise<boolean> => enqueueFileOperation(async () =>');
   });
+
+  it('queues the complete compile operation through the file FIFO', () => {
+    expect(appSource).toContain('const compileProject = (): Promise<void> => enqueueFileOperation(async () =>');
+  });
 });

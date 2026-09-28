@@ -479,7 +479,7 @@ export function App() {
     }
   };
 
-  const compileProject = async () => {
+  const compileProject = (): Promise<void> => enqueueFileOperation(async () => {
     if (!projectRoot()) {
       setCompileStatus("请先打开项目");
       return;
@@ -525,7 +525,7 @@ export function App() {
     } finally {
       setCompiling(false);
     }
-  };
+  });
 
   const addFile = async (
     path: string,
@@ -1353,7 +1353,7 @@ function SourceView(props: {
   onScrollPosition: (position: SourceScrollPosition) => void;
   onInput: (value: string) => void;
 }) {
-   let editor: HTMLTextAreaElement | undefined;
+  let editor: HTMLTextAreaElement | undefined;
   let lineNumberGutter: HTMLDivElement | undefined;
   const lineNumbers = createMemo(() => {
     const count = Math.max(1, props.content.split("\n").length);
@@ -1367,14 +1367,14 @@ function SourceView(props: {
     void path;
     queueMicrotask(() => {
       if (!editor) return;
-       if (editor.value !== content) editor.value = content;
+      if (editor.value !== content) editor.value = content;
       editor.scrollTop = position.top;
       editor.scrollLeft = 0;
       if (lineNumberGutter) lineNumberGutter.scrollTop = editor.scrollTop;
     });
   });
 
-   return (
+  return (
     <article class="source-wrap">
       <div class="source-code">
         <Show when={props.editable} fallback={<div class="source-unavailable">无法打开此文件</div>}>

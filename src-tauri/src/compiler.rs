@@ -2,7 +2,9 @@ use crate::project::SourceFile;
 use crate::services::{parse_latex_diagnostics, parse_tectonic_diagnostics};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -31,6 +33,66 @@ fn copy_project(source: &Path, destination: &Path) -> Result<(), CompileError> {
         } else {
             fs::copy(path, target).map_err(|_| CompileError::Workspace)?;
         }
+    }
+    Ok(())
+}
+
+pub type CompileWorkspaceSnapshot = BTreeMap<PathBuf, Vec<u8>>;
+
+fn collect_workspace_files(
+    root: &Path,
+    directory: &Path,
+    snapshot: &mut CompileWorkspaceSnapshot,
+) -> Result<(), CompileError> {
+    for item in fs::read_dir(directory).map_err(|_| CompileError::Workspace)? {
+        let path = item.map_err(|_| CompileError::Workspace)?.path();
+        if path.is_dir() {
+            collect_workspace_files(root, &path, snapshot)?;
+        } else {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| CompileError::Workspace)?
+                .to_path_buf();
+            let bytes = fs::read(&path).map_err(|_| CompileError::Workspace)?;
+            snapshot.insert(relative, Sha256::digest(bytes).to_vec());
+        }
+    }
+    Ok(())
+}
+
+pub fn snapshot_compile_workspace(root: &Path) -> Result<CompileWorkspaceSnapshot, CompileError> {
+    let mut snapshot = BTreeMap::new();
+    collect_workspace_files(root, root, &mut snapshot)?;
+    Ok(snapshot)
+}
+
+pub fn synchronize_compile_outputs(
+    root: &Path,
+    workspace: &Path,
+    before: &CompileWorkspaceSnapshot,
+    preview_pdf: &Path,
+) -> Result<(), CompileError> {
+    let after = snapshot_compile_workspace(workspace)?;
+    for path in before.keys() {
+        if path != preview_pdf && !after.contains_key(path) {
+            let target = root.join(path);
+            if target.exists() {
+                fs::remove_file(target).map_err(|_| CompileError::Workspace)?;
+            }
+        }
+    }
+    for (path, hash) in &after {
+        if path == preview_pdf || before.get(path) == Some(hash) {
+            continue;
+        }
+        let source = workspace.join(path);
+        let target = root.join(path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|_| CompileError::Workspace)?;
+        }
+        let temporary = target.with_extension("papercompile.compile.tmp");
+        fs::copy(source, &temporary).map_err(|_| CompileError::Workspace)?;
+        fs::rename(temporary, target).map_err(|_| CompileError::Workspace)?;
     }
     Ok(())
 }
@@ -284,6 +346,7 @@ pub fn compile_project_detailed(
     }
     let workspace = prepare_compile_workspace(root, entry, sources)?;
     let compile_root = workspace.path();
+    let before = snapshot_compile_workspace(compile_root)?;
     let compiler = detect_compiler()?;
     let mut log = String::new();
     let mut success = true;
@@ -313,6 +376,10 @@ pub fn compile_project_detailed(
     let pages = success
         .then(|| read_pdf_pages(&pdf_path))
         .unwrap_or_default();
+    let preview_pdf = pdf_path
+        .strip_prefix(compile_root)
+        .map_err(|_| CompileError::Workspace)?;
+    synchronize_compile_outputs(root, compile_root, &before, preview_pdf)?;
     Ok(CompileReport {
         success,
         pdf_data,
