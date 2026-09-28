@@ -213,7 +213,8 @@ fn synchronizes_compiler_file_changes_by_content_hash_except_the_preview_pdf() {
     fs::write(workspace.path().join("removed.out"), b"remove me").unwrap();
     fs::write(workspace.path().join("unchanged.bin"), [0_u8, 1, 2]).unwrap();
 
-    let before = snapshot_compile_workspace(workspace.path()).unwrap();
+    let disk_before = snapshot_compile_workspace(root.path()).unwrap();
+    let workspace_before = snapshot_compile_workspace(workspace.path()).unwrap();
     fs::write(workspace.path().join("build/main.aux"), b"new aux").unwrap();
     fs::remove_file(workspace.path().join("removed.out")).unwrap();
     fs::write(workspace.path().join("created.bin"), [3_u8, 4, 5]).unwrap();
@@ -222,7 +223,8 @@ fn synchronizes_compiler_file_changes_by_content_hash_except_the_preview_pdf() {
     synchronize_compile_outputs(
         root.path(),
         workspace.path(),
-        &before,
+        &disk_before,
+        &workspace_before,
         std::path::Path::new("main.pdf"),
     )
     .unwrap();
@@ -241,4 +243,62 @@ fn synchronizes_compiler_file_changes_by_content_hash_except_the_preview_pdf() {
         [0_u8, 1, 2]
     );
     assert!(!root.path().join("main.pdf").exists());
+}
+
+#[test]
+fn rejects_all_compile_outputs_when_the_project_changed_during_compilation() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("main.tex"), b"original").unwrap();
+    fs::write(workspace.path().join("main.tex"), b"original").unwrap();
+    let disk_before = snapshot_compile_workspace(root.path()).unwrap();
+    let workspace_before = snapshot_compile_workspace(workspace.path()).unwrap();
+
+    fs::write(workspace.path().join("main.aux"), b"generated").unwrap();
+    fs::write(root.path().join("main.tex"), b"external edit").unwrap();
+
+    let result = synchronize_compile_outputs(
+        root.path(),
+        workspace.path(),
+        &disk_before,
+        &workspace_before,
+        std::path::Path::new("main.pdf"),
+    );
+
+    assert_eq!(result, Err(CompileError::ProjectChanged));
+    assert_eq!(
+        fs::read(root.path().join("main.tex")).unwrap(),
+        b"external edit"
+    );
+    assert!(!root.path().join("main.aux").exists());
+}
+
+#[test]
+fn rolls_back_earlier_outputs_when_a_later_commit_fails() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("a.aux"), b"old").unwrap();
+    fs::create_dir(root.path().join("z-blocked.aux")).unwrap();
+    fs::write(workspace.path().join("a.aux"), b"old").unwrap();
+    let disk_before = snapshot_compile_workspace(root.path()).unwrap();
+    let workspace_before = snapshot_compile_workspace(workspace.path()).unwrap();
+
+    fs::write(workspace.path().join("a.aux"), b"new").unwrap();
+    fs::write(
+        workspace.path().join("z-blocked.aux"),
+        b"cannot replace directory",
+    )
+    .unwrap();
+
+    let result = synchronize_compile_outputs(
+        root.path(),
+        workspace.path(),
+        &disk_before,
+        &workspace_before,
+        std::path::Path::new("main.pdf"),
+    );
+
+    assert_eq!(result, Err(CompileError::Workspace));
+    assert_eq!(fs::read(root.path().join("a.aux")).unwrap(), b"old");
+    assert!(root.path().join("z-blocked.aux").is_dir());
 }

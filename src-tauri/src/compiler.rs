@@ -21,6 +21,8 @@ pub enum CompileError {
     Failed,
     #[error("could not prepare temporary compilation workspace")]
     Workspace,
+    #[error("project changed during compilation")]
+    ProjectChanged,
 }
 
 fn copy_project(source: &Path, destination: &Path) -> Result<(), CompileError> {
@@ -69,32 +71,99 @@ pub fn snapshot_compile_workspace(root: &Path) -> Result<CompileWorkspaceSnapsho
 pub fn synchronize_compile_outputs(
     root: &Path,
     workspace: &Path,
-    before: &CompileWorkspaceSnapshot,
+    disk_before: &CompileWorkspaceSnapshot,
+    workspace_before: &CompileWorkspaceSnapshot,
     preview_pdf: &Path,
 ) -> Result<(), CompileError> {
     let after = snapshot_compile_workspace(workspace)?;
-    for path in before.keys() {
-        if path != preview_pdf && !after.contains_key(path) {
-            let target = root.join(path);
-            if target.exists() {
-                fs::remove_file(target).map_err(|_| CompileError::Workspace)?;
+    let mut paths = workspace_before
+        .keys()
+        .chain(after.keys())
+        .filter(|path| path.as_path() != preview_pdf)
+        .cloned()
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths.retain(|path| workspace_before.get(path) != after.get(path));
+
+    let transaction_parent = root.parent().ok_or(CompileError::Workspace)?;
+    let transaction = tempfile::Builder::new()
+        .prefix("papercompile-commit-")
+        .tempdir_in(transaction_parent)
+        .map_err(|_| CompileError::Workspace)?;
+    let staged_root = transaction.path().join("staged");
+    let backup_root = transaction.path().join("backup");
+
+    for path in &paths {
+        if after.contains_key(path) {
+            let staged = staged_root.join(path);
+            if let Some(parent) = staged.parent() {
+                fs::create_dir_all(parent).map_err(|_| CompileError::Workspace)?;
+            }
+            fs::copy(workspace.join(path), staged).map_err(|_| CompileError::Workspace)?;
+        }
+    }
+
+    if snapshot_compile_workspace(root)? != *disk_before {
+        return Err(CompileError::ProjectChanged);
+    }
+    for path in &paths {
+        let target = root.join(path);
+        if disk_before.contains_key(path) {
+            if !target.is_file() {
+                return Err(CompileError::ProjectChanged);
+            }
+        } else if target.exists() {
+            return Err(CompileError::Workspace);
+        }
+    }
+
+    let mut committed = Vec::new();
+    for path in &paths {
+        let target = root.join(path);
+        let backup = backup_root.join(path);
+        let had_original = disk_before.contains_key(path);
+        if had_original {
+            if let Some(parent) = backup.parent() {
+                if fs::create_dir_all(parent).is_err() {
+                    rollback_compile_outputs(root, &backup_root, &committed);
+                    return Err(CompileError::Workspace);
+                }
+            }
+            if fs::rename(&target, &backup).is_err() {
+                rollback_compile_outputs(root, &backup_root, &committed);
+                return Err(CompileError::Workspace);
             }
         }
-    }
-    for (path, hash) in &after {
-        if path == preview_pdf || before.get(path) == Some(hash) {
-            continue;
+        if after.contains_key(path) {
+            if let Some(parent) = target.parent() {
+                if fs::create_dir_all(parent).is_err()
+                    || fs::rename(staged_root.join(path), &target).is_err()
+                {
+                    if had_original {
+                        let _ = fs::rename(&backup, &target);
+                    }
+                    rollback_compile_outputs(root, &backup_root, &committed);
+                    return Err(CompileError::Workspace);
+                }
+            }
         }
-        let source = workspace.join(path);
-        let target = root.join(path);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|_| CompileError::Workspace)?;
-        }
-        let temporary = target.with_extension("papercompile.compile.tmp");
-        fs::copy(source, &temporary).map_err(|_| CompileError::Workspace)?;
-        fs::rename(temporary, target).map_err(|_| CompileError::Workspace)?;
+        committed.push(path.clone());
     }
     Ok(())
+}
+
+fn rollback_compile_outputs(root: &Path, backup_root: &Path, committed: &[PathBuf]) {
+    for path in committed.iter().rev() {
+        let target = root.join(path);
+        let backup = backup_root.join(path);
+        if target.is_file() {
+            let _ = fs::remove_file(&target);
+        }
+        if backup.exists() {
+            let _ = fs::rename(backup, target);
+        }
+    }
 }
 
 pub fn prepare_compile_workspace(
@@ -344,9 +413,10 @@ pub fn compile_project_detailed(
     {
         return Err(CompileError::UnsafeEntry);
     }
+    let disk_before = snapshot_compile_workspace(root)?;
     let workspace = prepare_compile_workspace(root, entry, sources)?;
     let compile_root = workspace.path();
-    let before = snapshot_compile_workspace(compile_root)?;
+    let workspace_before = snapshot_compile_workspace(compile_root)?;
     let compiler = detect_compiler()?;
     let mut log = String::new();
     let mut success = true;
@@ -379,7 +449,13 @@ pub fn compile_project_detailed(
     let preview_pdf = pdf_path
         .strip_prefix(compile_root)
         .map_err(|_| CompileError::Workspace)?;
-    synchronize_compile_outputs(root, compile_root, &before, preview_pdf)?;
+    synchronize_compile_outputs(
+        root,
+        compile_root,
+        &disk_before,
+        &workspace_before,
+        preview_pdf,
+    )?;
     Ok(CompileReport {
         success,
         pdf_data,
