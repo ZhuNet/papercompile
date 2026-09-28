@@ -55,10 +55,10 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 .source-code { display: grid; grid-template-columns: 58px minmax(0, 1fr); height: 100%; overflow: hidden; }
 .source-line-numbers { padding: 25px 12px 25px 0; overflow: hidden; border-right: 1px solid #343d4d; color: #657086; font: 12px/2 "Cascadia Code", "Cascadia Mono", Consolas, monospace; text-align: right; user-select: none; }
 .source-line-numbers span { display: block; height: 24px; }
-.source-editor { min-width: 0; height: 100%; padding: 25px; overflow-y: auto; overflow-x: hidden; outline: none; color: #d4d4d4; caret-color: #f8f8f2; font: 12px/2 "Cascadia Code", "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; scrollbar-color: #59677a transparent; tab-size: 2; white-space: pre-wrap; word-break: break-word; }
+.source-editor { min-width: 0; width: 100%; height: 100%; padding: 25px; overflow-y: auto; overflow-x: hidden; resize: none; border: 0; outline: none; background: transparent; color: #d4d4d4; caret-color: #f8f8f2; font: 12px/2 "Cascadia Code", "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; scrollbar-color: #59677a transparent; tab-size: 2; white-space: pre-wrap; word-break: break-word; }
 .source-editor::-webkit-scrollbar { width: 8px; }.source-editor::-webkit-scrollbar-track { background: transparent; }.source-editor::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: #59677a; background-clip: padding-box; }
-.source-editor[contenteditable="true"]:focus { outline: none; }
-.source-editor[contenteditable="false"] { color: #8792a3; cursor: default; }
+.source-editor:focus { outline: none; }
+.source-editor:disabled { color: #8792a3; cursor: default; }
 .source-editor::selection { color: #f8f8f2; background: rgb(38 79 120 / 68%); }
 .source-unavailable { display: grid; grid-column: 1 / -1; place-items: center; height: 100%; color: #8994a5; font: 13px "Segoe UI", sans-serif; }
 /* Compact split AI workbench: history left, composer right. */

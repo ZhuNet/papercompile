@@ -1353,7 +1353,7 @@ function SourceView(props: {
   onScrollPosition: (position: SourceScrollPosition) => void;
   onInput: (value: string) => void;
 }) {
-  let editor: HTMLDivElement | undefined;
+   let editor: HTMLTextAreaElement | undefined;
   let lineNumberGutter: HTMLDivElement | undefined;
   const lineNumbers = createMemo(() => {
     const count = Math.max(1, props.content.split("\n").length);
@@ -1367,52 +1367,35 @@ function SourceView(props: {
     void path;
     queueMicrotask(() => {
       if (!editor) return;
-      if (editor.textContent !== content) editor.textContent = content;
+       if (editor.value !== content) editor.value = content;
       editor.scrollTop = position.top;
       editor.scrollLeft = 0;
       if (lineNumberGutter) lineNumberGutter.scrollTop = editor.scrollTop;
     });
   });
 
-  const pastePlainText = (event: ClipboardEvent) => {
-    event.preventDefault();
-    const text = event.clipboardData?.getData("text/plain") ?? "";
-    const selection = window.getSelection();
-    if (!editor || !selection?.rangeCount || !editor.contains(selection.anchorNode)) return;
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    const node = document.createTextNode(text);
-    range.insertNode(node);
-    range.setStartAfter(node);
-    range.collapse(true);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    editor?.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
-  };
-
-  return (
+   return (
     <article class="source-wrap">
       <div class="source-code">
         <Show when={props.editable} fallback={<div class="source-unavailable">无法打开此文件</div>}>
           <div ref={lineNumberGutter} class="source-line-numbers" aria-hidden="true">
             <For each={lineNumbers()}>{(line) => <span>{line}</span>}</For>
           </div>
-          <div
-            ref={editor}
-            class="source-editor"
-            contentEditable
-            role="textbox"
-            aria-multiline="true"
+           <textarea
+             ref={editor}
+             class="source-editor"
+             role="textbox"
+             aria-multiline="true"
             spellcheck={false}
             autocapitalize="off"
             autocorrect="off"
-            onInput={(event) => props.onInput(event.currentTarget.textContent ?? "")}
-            onPaste={pastePlainText}
+             value={props.content}
+             onInput={(event) => props.onInput(event.currentTarget.value)}
             onScroll={(event) => {
               if (lineNumberGutter) lineNumberGutter.scrollTop = event.currentTarget.scrollTop;
               props.onScrollPosition({ top: event.currentTarget.scrollTop, left: 0 });
             }}
-          />
+           />
         </Show>
       </div>
     </article>

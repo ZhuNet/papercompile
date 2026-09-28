@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import appSource from '../App.tsx?raw';
 
 describe('file tree creation markup', () => {
+  it('uses textarea value so source newlines survive editor updates', () => {
+    expect(appSource).toContain('<textarea');
+    expect(appSource).toContain('onInput={(event) => props.onInput(event.currentTarget.value)}');
+    expect(appSource).not.toContain('contentEditable');
+    expect(appSource).not.toContain('event.currentTarget.textContent');
+  });
+
   it('uses inline creation state instead of prompt dialogs', () => {
     expect(appSource).toContain('creationKind()');
     expect(appSource).toContain('class="tree-create"');

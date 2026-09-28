@@ -14,10 +14,9 @@ describe('source editor markup', () => {
   });
 
   it('uses one native editable text layer with a line-number gutter', () => {
-    expect(sourceView).toContain('contentEditable');
+    expect(sourceView).toContain('<textarea');
     expect(sourceView).toContain('class="source-line-numbers"');
     expect(sourceView).toContain('class="source-editor"');
-    expect(sourceView).not.toContain('<textarea');
     expect(sourceView).not.toContain('<pre');
     expect(sourceView).not.toContain('highlightSourceMatches(');
   });
@@ -34,9 +33,9 @@ describe('source editor markup', () => {
     expect(styles).toContain('white-space: pre-wrap;');
     expect(styles).toContain('overflow-wrap: anywhere;');
     expect(styles).toContain('overflow-x: hidden;');
-    expect(styles).toContain('.source-editor[contenteditable="true"]');
-    expect(sourceView).toContain('editor.textContent !== content');
-    expect(sourceView).toContain('onPaste');
+    expect(styles).toContain('.source-editor:focus');
+    expect(sourceView).toContain('editor.value !== content');
+    expect(sourceView).toContain('event.currentTarget.value');
   });
 
   it('uses one 44px topbar', () => {
