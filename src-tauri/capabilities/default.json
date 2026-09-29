@@ -3,5 +3,16 @@
   "identifier": "default",
   "description": "PaperCompile desktop permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save", "opener:allow-open-path"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-close",
+    "core:window:allow-set-fullscreen",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "opener:allow-open-path"
+  ]
 }

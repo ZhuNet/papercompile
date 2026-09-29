@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "PaperCompile", "width": 1440, "height": 960 }],
+    "windows": [{ "title": "PaperCompile", "width": 1440, "height": 960, "decorations": false}],
     "security": { "csp": null }
   },
   "bundle": {

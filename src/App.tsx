@@ -10,6 +10,7 @@ import {
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { projectLocation } from "./projectView";
 import { operationErrorReason, type OperationKind } from "./operationMessage";
@@ -79,7 +80,9 @@ type CompileReport = {
 };
 
 export function App() {
+  const appWindow = getCurrentWindow();
   const [view, setView] = createSignal<"preview" | "source">("source");
+  const [windowMaximized, setWindowMaximized] = createSignal(false);
   const [aiOpen, setAiOpen] = createSignal(true);
   const [prompt, setPrompt] = createSignal("");
   const [toolbarMessage, setToolbarMessage] = createSignal<{
@@ -220,6 +223,7 @@ export function App() {
 
   onMount(() => {
     const unlisteners: Promise<() => void>[] = [];
+    void appWindow.isMaximized().then(setWindowMaximized);
     unlisteners.push(listen<AgentEvent>("agent-event", async ({ payload }) => {
       if (payload.type === "ready") {
         setAgentReady(true);
@@ -836,6 +840,15 @@ export function App() {
     setAiSettingsOpen(false);
     showToolbarMessage("LLM 配置已应用", "success");
   };
+  const runWindowAction = (action: () => Promise<void>) => {
+    void action().catch((error) => showToolbarMessage(`窗口操作失败：${String(error)}`, "error"));
+  };
+  const toggleWindowMaximize = async () => {
+    const maximized = await appWindow.isMaximized();
+    if (maximized) await appWindow.unmaximize();
+    else await appWindow.maximize();
+    setWindowMaximized(!maximized);
+  };
   const selectTreeItem = (path: string, kind: "file" | "folder") => {
     setSelectedTreeItem(path);
     if (kind === "file") {
@@ -883,6 +896,9 @@ export function App() {
       }}
     >
       <header class="topbar">
+        <div class="app-identity">
+          <img src="/app-icon.svg" alt="" />
+        </div>
         <div class="topbar-view-toggle">
           <button
             class={view() === "source" ? "active" : ""}
@@ -893,7 +909,8 @@ export function App() {
             onClick={() => setView("preview")}
           >正文</button>
         </div>
-        <div class="top-actions">
+        <div class="topbar-spacer" aria-hidden="true" />
+        <div class="business-actions">
           <button title="保存" aria-label="保存" onClick={saveProject}>
             <svg class="action-svg" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
@@ -901,30 +918,42 @@ export function App() {
               <rect x="7" y="13" width="10" height="7" rx="1" />
             </svg>
           </button>
-          <button
-            title="撤销"
-            aria-label="撤销"
-            onClick={undo}
-            disabled={!undoStack().length}
-          >
+          <button title="撤销" aria-label="撤销" onClick={undo} disabled={!undoStack().length}>
             <svg class="action-svg" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M8 7H3v-5" />
               <path d="M3.7 7.1A9 9 0 1 1 3.4 17" />
             </svg>
           </button>
-          <button
-            title="编译"
-            aria-label="编译"
-            onClick={compileProject}
-            disabled={compiling()}
-          >
-            <svg
-              class={`action-svg compile-icon ${compiling() ? "busy" : ""}`}
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
+          <button title="编译" aria-label="编译" onClick={compileProject} disabled={compiling()}>
+            <svg class={`action-svg compile-icon ${compiling() ? "busy" : ""}`} viewBox="0 0 24 24" aria-hidden="true">
               <path d="M5 3v18l16-9z" />
             </svg>
+          </button>
+        </div>
+        <div class="window-actions">
+          <button
+            class="window-control"
+            title="最小化"
+            aria-label="最小化"
+            onClick={() => runWindowAction(() => appWindow.minimize())}
+          >
+            <span class="window-minimize-icon" aria-hidden="true" />
+          </button>
+          <button
+            class="window-control"
+            title={windowMaximized() ? "还原" : "最大化"}
+            aria-label={windowMaximized() ? "还原" : "最大化"}
+            onClick={() => runWindowAction(toggleWindowMaximize)}
+          >
+            <span class={`window-maximize-icon ${windowMaximized() ? "restored" : ""}`} aria-hidden="true" />
+          </button>
+          <button
+            class="window-control window-close-control"
+            title="关闭"
+            aria-label="关闭"
+            onClick={() => runWindowAction(() => appWindow.close())}
+          >
+            <span class="window-close-icon" aria-hidden="true" />
           </button>
         </div>
       </header>
