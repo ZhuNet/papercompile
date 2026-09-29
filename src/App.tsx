@@ -11,6 +11,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { open } from "@tauri-apps/plugin-dialog";
 import { projectLocation } from "./projectView";
 import { operationErrorReason, type OperationKind } from "./operationMessage";
@@ -849,6 +850,43 @@ export function App() {
     else await appWindow.maximize();
     setWindowMaximized(!maximized);
   };
+  let draggingWindow = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let windowStartX = 0;
+  let windowStartY = 0;
+  let windowScaleFactor = 1;
+  const stopWindowDrag = () => {
+    if (!draggingWindow) return;
+    draggingWindow = false;
+    window.removeEventListener("pointermove", moveWindow);
+    window.removeEventListener("pointerup", stopWindowDrag);
+    window.removeEventListener("pointercancel", stopWindowDrag);
+  };
+  const moveWindow = (event: PointerEvent) => {
+    if (!draggingWindow) return;
+    const deltaX = Math.round((event.screenX - dragStartX) * windowScaleFactor);
+    const deltaY = Math.round((event.screenY - dragStartY) * windowScaleFactor);
+    runWindowAction(() => appWindow.setPosition(new PhysicalPosition(windowStartX + deltaX, windowStartY + deltaY)));
+  };
+  const startWindowDrag = async (event: MouseEvent) => {
+    const target = event.target as Element;
+    if (target.closest("button, input, textarea, select, a")) return;
+    event.preventDefault();
+    const [position, scaleFactor] = await Promise.all([
+      appWindow.outerPosition(),
+      appWindow.scaleFactor(),
+    ]);
+    draggingWindow = true;
+    dragStartX = event.screenX;
+    dragStartY = event.screenY;
+    windowStartX = position.x;
+    windowStartY = position.y;
+    windowScaleFactor = scaleFactor;
+    window.addEventListener("pointermove", moveWindow);
+    window.addEventListener("pointerup", stopWindowDrag);
+    window.addEventListener("pointercancel", stopWindowDrag);
+  };
   const selectTreeItem = (path: string, kind: "file" | "folder") => {
     setSelectedTreeItem(path);
     if (kind === "file") {
@@ -895,7 +933,7 @@ export function App() {
           document.querySelectorAll<HTMLDetailsElement>(".control-menu[open]").forEach(menu => menu.removeAttribute("open"));
       }}
     >
-      <header class="topbar">
+      <header class="topbar" onMouseDown={startWindowDrag} onDblClick={toggleWindowMaximize}>
         <div class="app-identity">
           <img src="/app-icon.svg" alt="" />
         </div>

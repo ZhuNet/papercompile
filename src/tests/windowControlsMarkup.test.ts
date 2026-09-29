@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import appSource from '../App.tsx?raw';
 import styles from '../styles.css?inline';
+import capability from '../../src-tauri/capabilities/default.json';
 
 describe('window controls', () => {
   it('places minimize, maximize, and close controls at the right of the topbar', () => {
@@ -24,5 +25,17 @@ describe('window controls', () => {
     expect(styles).toContain('place-items: center');
     expect(styles).toContain('width: 30px');
     expect(styles).toContain('height: 30px');
+  });
+
+  it('does not invoke native dragging from topbar clicks', () => {
+    expect(appSource).toContain('onMouseDown={startWindowDrag}');
+    expect(appSource).toContain('onDblClick={toggleWindowMaximize}');
+    expect(appSource).toContain('setPosition');
+    expect(appSource).toContain('pointermove');
+    expect(appSource).toContain('pointerup');
+    expect(capability.permissions).toContain('core:window:allow-set-position');
+    expect(capability.permissions).not.toContain('core:window:allow-start-dragging');
+    expect(appSource).not.toContain('startDragging()');
+    expect(appSource).not.toContain('data-tauri-drag-region');
   });
 });
