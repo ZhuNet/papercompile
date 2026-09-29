@@ -142,6 +142,7 @@ export function App() {
   let interactionScroll: HTMLDivElement | undefined;
   let composerInput: HTMLTextAreaElement | undefined;
   let aiDock: HTMLElement | undefined;
+  let workspace: HTMLElement | undefined;
   let followInteractionBottom = true;
   const agentTranscript = new AgentTranscript(
     (requestId, value) => void respondToInteraction(requestId, value),
@@ -302,11 +303,18 @@ export function App() {
     };
     const interactionBottomOffset = scrollBottomOffset(interactionScroll);
     const composerBottomOffset = scrollBottomOffset(composerInput);
+    const workspaceScrolls = Array.from(
+      workspace?.querySelectorAll<HTMLElement>('.outline, .revision-panel, .source-editor') ?? [],
+    );
+    const workspaceBottomOffsets = workspaceScrolls.map(scrollBottomOffset);
     let nextHeight = startHeight;
     let pendingFrame: number | undefined;
     const applyResize = () => {
       pendingFrame = undefined;
       aiDock?.style.setProperty("--ai-panel-height", `${nextHeight}px`);
+      workspaceScrolls.forEach((element, index) =>
+        restoreScrollBottom(element, workspaceBottomOffsets[index]),
+      );
       if (aiRunning() && followInteractionBottom && interactionScroll) {
         interactionScroll.scrollTop = interactionScroll.scrollHeight;
       } else restoreScrollBottom(interactionScroll, interactionBottomOffset);
@@ -1002,7 +1010,7 @@ export function App() {
           </div>
         )}
       </Show>
-      <section class="workspace">
+      <section class="workspace" ref={workspace}>
         <aside class="outline">
           <div class="project-file-header">
             <button

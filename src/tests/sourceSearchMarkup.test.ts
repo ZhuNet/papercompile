@@ -39,7 +39,7 @@ describe('source editor markup', () => {
   });
 
   it('uses one 44px topbar', () => {
-    expect(styles).toContain('grid-template-rows: 44px minmax(0, 1fr);');
+    expect(styles).toContain('grid-template-rows: 44px minmax(0, 1fr) auto;');
   });
 
   it('uses a transparent scrollbar track in the source editor', () => {

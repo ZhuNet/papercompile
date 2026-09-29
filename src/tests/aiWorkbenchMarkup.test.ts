@@ -116,11 +116,23 @@ describe('AI workbench markup', () => {
     expect(resizeHandler).toContain('pendingFrame');
   });
 
-  it('keeps the PDF workspace out of the AI dock resize layout flow', () => {
+  it('resizes the workspace through the main grid while keeping PDF hidden during drag', () => {
     expect(styles).toContain('.app-shell { position: relative;');
-    expect(styles).toContain('grid-template-rows: 44px minmax(0, 1fr);');
-    expect(styles).toContain('.ai-dock { position: absolute;');
-    expect(styles).toContain('bottom: 0;');
+    expect(styles).toContain('grid-template-rows: 44px minmax(0, 1fr) auto;');
+    expect(styles).not.toContain('.ai-dock { position: absolute;');
+    expect(styles).toContain('.app-shell.ai-resizing .pdf-preview { visibility: hidden; }');
+  });
+
+  it('preserves upper workspace scroll bottom offsets while resizing', () => {
+    const resizeHandler = appSource.slice(
+      appSource.indexOf('const resizeAiPanel'),
+      appSource.indexOf('const applyProjectFiles'),
+    );
+    expect(resizeHandler).toContain('workspaceScrolls');
+    expect(resizeHandler).toContain('workspace?.querySelectorAll<HTMLElement>');
+    expect(resizeHandler).toContain('workspaceScrolls.map(scrollBottomOffset)');
+    expect(resizeHandler).toContain('restoreScrollBottom(element, workspaceBottomOffsets[index])');
+    expect(resizeHandler).toContain('workspaceBottomOffsets');
   });
 
   it('suspends PDF painting while the AI dock is being resized', () => {

@@ -2,7 +2,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 900px; background: #e9e8e3; }
 button, textarea { font: inherit; } button { cursor: pointer; }
-.app-shell { position: relative; height: 100vh; display: grid; grid-template-rows: 44px minmax(0, 1fr); overflow: hidden; }
+.app-shell { position: relative; height: 100vh; display: grid; grid-template-rows: 44px minmax(0, 1fr) auto; overflow: hidden; }
 .topbar { display: flex; min-width: 0; align-items: center; padding: 0 16px; background: #172335; color: #f8f4ea; }
 .app-identity { display: flex; flex: 0 0 auto; align-items: center; margin-right: 10px; user-select: none; }.app-identity img { display: block; width: 20px; height: 20px; }
 .topbar-view-toggle { display: flex; align-items: center; gap: 4px; }
@@ -45,7 +45,7 @@ button, textarea { font: inherit; } button { cursor: pointer; }
 /* Overleaf-like project navigation and VS Code-like LaTeX editing. */
 .tree-item { font: 11px/1.45 "Segoe UI", "Microsoft YaHei UI", sans-serif; }
 .tree-item.folder { font-weight: 600; }
-.ai-dock { position: absolute; right: 0; bottom: 0; left: 0; z-index: 10; }
+.ai-dock { position: relative; z-index: 10; }
 .app-shell.ai-resizing .pdf-preview { visibility: hidden; }
 .ai-body { position: relative; max-width: 1020px; margin: auto; padding: 8px 20px 7px; }
 .source-wrap { background: #1e1e1e; }
