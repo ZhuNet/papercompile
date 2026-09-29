@@ -106,6 +106,43 @@ describe('AI workbench markup', () => {
     expect(appSource).toContain('ref={composerInput}');
   });
 
+  it('coalesces AI dock resize layout work to animation frames', () => {
+    const resizeHandler = appSource.slice(
+      appSource.indexOf('const resizeAiPanel'),
+      appSource.indexOf('const applyProjectFiles'),
+    );
+    expect(resizeHandler).toContain('requestAnimationFrame');
+    expect(resizeHandler).toContain('cancelAnimationFrame');
+    expect(resizeHandler).toContain('pendingFrame');
+  });
+
+  it('keeps the PDF workspace out of the AI dock resize layout flow', () => {
+    expect(styles).toContain('.app-shell { position: relative;');
+    expect(styles).toContain('grid-template-rows: 44px minmax(0, 1fr);');
+    expect(styles).toContain('.ai-dock { position: absolute;');
+    expect(styles).toContain('bottom: 0;');
+  });
+
+  it('suspends PDF painting while the AI dock is being resized', () => {
+    expect(appSource).toContain('const [aiResizing, setAiResizing] = createSignal(false);');
+    expect(appSource).toContain('setAiResizing(true);');
+    expect(appSource).toContain('setAiResizing(false);');
+    expect(appSource).toContain('class={`app-shell ${aiResizing() ? "ai-resizing" : ""}`}');
+    expect(styles).toContain('.app-shell.ai-resizing .pdf-preview { visibility: hidden; }');
+  });
+
+  it('restores the PDF when an AI dock resize is cancelled', () => {
+    const resizeHandler = appSource.slice(
+      appSource.indexOf('const resizeAiPanel'),
+      appSource.indexOf('const applyProjectFiles'),
+    );
+    expect(resizeHandler).toContain('const finish = () =>');
+    expect(resizeHandler).toContain('window.addEventListener("pointercancel", finish)');
+    expect(resizeHandler).toContain('window.addEventListener("blur", finish)');
+    expect(resizeHandler).toContain('window.removeEventListener("pointercancel", finish)');
+    expect(resizeHandler).toContain('window.removeEventListener("blur", finish)');
+  });
+
   it('stretches both interaction and composer areas to the resized dock height', () => {
     expect(styles).toContain('.ai-dock .ai-body {');
     expect(styles).toContain('height: 100%;');

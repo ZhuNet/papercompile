@@ -124,6 +124,7 @@ export function App() {
   const [agentReady, setAgentReady] = createSignal(false);
   const [agentStatus, setAgentStatus] = createSignal("正在连接 Agent...");
   const [aiRunning, setAiRunning] = createSignal(false);
+  const [aiResizing, setAiResizing] = createSignal(false);
   const [aiSettingsOpen, setAiSettingsOpen] = createSignal(false);
   const savedAiPanelHeight = Number(localStorage.getItem(aiPanelHeightKey));
   const [aiPanelHeight, setAiPanelHeight] = createSignal(
@@ -286,6 +287,7 @@ export function App() {
   const resizeAiPanel = (event: PointerEvent) => {
     if (!aiOpen()) return;
     event.preventDefault();
+    setAiResizing(true);
     const startY = event.clientY;
     const startHeight = aiPanelHeight();
     const scrollBottomOffset = (element?: HTMLElement) =>
@@ -296,22 +298,37 @@ export function App() {
     const interactionBottomOffset = scrollBottomOffset(interactionScroll);
     const composerBottomOffset = scrollBottomOffset(composerInput);
     let nextHeight = startHeight;
-    const move = (moveEvent: PointerEvent) => {
-      nextHeight = clampAiPanelHeight(startHeight + startY - moveEvent.clientY, window.innerHeight);
+    let pendingFrame: number | undefined;
+    const applyResize = () => {
+      pendingFrame = undefined;
       aiDock?.style.setProperty("--ai-panel-height", `${nextHeight}px`);
       if (aiRunning() && followInteractionBottom && interactionScroll) {
         interactionScroll.scrollTop = interactionScroll.scrollHeight;
       } else restoreScrollBottom(interactionScroll, interactionBottomOffset);
       restoreScrollBottom(composerInput, composerBottomOffset);
     };
+    const move = (moveEvent: PointerEvent) => {
+      nextHeight = clampAiPanelHeight(startHeight + startY - moveEvent.clientY, window.innerHeight);
+      if (pendingFrame === undefined) pendingFrame = requestAnimationFrame(applyResize);
+    };
+    let finished = false;
     const finish = () => {
+      if (finished) return;
+      finished = true;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("blur", finish);
+      if (pendingFrame !== undefined) cancelAnimationFrame(pendingFrame);
+      applyResize();
       setAiPanelHeight(nextHeight);
       localStorage.setItem(aiPanelHeightKey, String(nextHeight));
+      setAiResizing(false);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish);
+    window.addEventListener("blur", finish);
   };
 
   const applyProjectFiles = (project: ProjectResponse) => {
@@ -839,7 +856,7 @@ export function App() {
 
   return (
     <main
-      class="app-shell"
+      class={`app-shell ${aiResizing() ? "ai-resizing" : ""}`}
       onPointerDown={(event) => {
         const target = event.target as Element;
         const pendingTreeSelection = target.closest(".tree-item") as HTMLElement | null;
